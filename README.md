@@ -2,6 +2,8 @@
 
 QuickNotes is a school-focused AI study app for learning from uploaded course material. The product goal is to let students upload PDF textbooks, class notes, and study documents, then ask questions and receive answers backed by citations from the source material.
 
+The long-term system will ingest PDFs, chunk and embed document text, perform hybrid semantic and keyword retrieval, and generate source-grounded answers with file and page references plus hallucination fallback controls.
+
 The app is being built as a resume-quality AI knowledge system, not a tutorial clone. The first version starts with a clean Next.js foundation and a product-shaped workspace so the document ingestion, retrieval, citation, and evaluation layers can be added without rewriting the app.
 
 ## Planned Features
