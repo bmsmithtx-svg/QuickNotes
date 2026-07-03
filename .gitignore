@@ -1,0 +1,48 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+build/
+dist/
+
+# production and coverage
+coverage/
+*.tsbuildinfo
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# local environment and secrets
+.env
+.env.*
+
+# local databases and generated data
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+uploads/
+storage/
+data/
+documents/
+extracted/
+embeddings/
+.vector/
+
+# source files that should not be committed
+*.pdf
+
+# deployments and editor state
+.vercel/
+.netlify/
+.DS_Store
+.idea/
+.vscode/
