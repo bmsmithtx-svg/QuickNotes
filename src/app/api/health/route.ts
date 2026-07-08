@@ -6,8 +6,8 @@ export function GET() {
     status: "ok",
     version: "0.1.0",
     capabilities: {
-      pdfUpload: "planned",
-      textExtraction: "planned",
+      pdfUpload: "ready",
+      textExtraction: "ready",
       citationBackedAnswers: "planned",
       hybridRetrieval: "planned",
       evaluationTests: "planned"

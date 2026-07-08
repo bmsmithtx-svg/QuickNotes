@@ -1,4 +1,4 @@
-export type StudyDocumentStatus = "queued" | "processing" | "indexed" | "failed";
+export type StudyDocumentUploadStatus = "uploaded" | "processing" | "ready" | "failed";
 
 export type StudyDocument = {
   id: string;
@@ -10,7 +10,64 @@ export type StudyDocument = {
   tags: string[];
   pageCount: number;
   uploadedAt: string;
-  status: StudyDocumentStatus;
+  status: StudyDocumentUploadStatus;
+};
+
+export type StudyDocumentSummary = {
+  id: string;
+  originalFileName: string;
+  storedFileName: string;
+  fileSize: number;
+  mimeType: string;
+  title: string;
+  className: string | null;
+  topic: string | null;
+  tags: string[];
+  uploadStatus: StudyDocumentUploadStatus;
+  pageCount: number | null;
+  chunkCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StudyDocumentDetail = StudyDocumentSummary & {
+  pageTextCount: number;
+};
+
+export type DocumentPagePreview = {
+  id: string;
+  documentId: string;
+  pageNumber: number;
+  text: string;
+  characterCount: number;
+  createdAt: string;
+};
+
+export type DocumentChunkPreview = {
+  id: string;
+  documentId: string;
+  pageNumber: number;
+  chunkIndex: number;
+  text: string;
+  characterCount: number;
+  tokenEstimate: number;
+  createdAt: string;
+};
+
+export type DocumentContentResponse = {
+  document: StudyDocumentDetail;
+  pages: DocumentPagePreview[];
+  chunks: DocumentChunkPreview[];
+  pageTotal: number;
+  chunkTotal: number;
+};
+
+export type DocumentUploadResponse = {
+  documentId: string;
+  originalFileName: string;
+  pageCount: number;
+  chunkCount: number;
+  status: StudyDocumentUploadStatus;
 };
 
 export type SourceCitation = {

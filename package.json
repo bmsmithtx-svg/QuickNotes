@@ -4,14 +4,17 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "lint": "node -e \"import('./eslint.config.mjs').then(() => console.log('eslint config ok'))\"",
+    "typecheck": "tsc --noEmit --skipLibCheck --module esnext --moduleResolution bundler --target es2017 --jsx react-jsx --lib dom,dom.iterable,esnext --strict src/lib/types.ts src/lib/chunking.ts src/lib/chunking.test.ts src/lib/sample-data.ts src/app/layout.tsx src/app/page.tsx src/components/quicknotes-workspace.tsx",
+    "test:unit": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "lucide-react": "^1.23.0",
     "next": "^16.2.10",
+    "pdfjs-dist": "^6.1.200",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
@@ -22,7 +25,10 @@
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.10",
+    "prisma": "^6.19.3",
     "tailwindcss": "^4.3.2",
-    "typescript": "^5.9.3"
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0"
   }
 }

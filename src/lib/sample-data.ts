@@ -1,4 +1,4 @@
-import { NOT_FOUND_IN_SOURCES, type SourceCitation, type StudyDocument, type StudyAnswer } from "@/lib/types";
+import { NOT_FOUND_IN_SOURCES, type SourceCitation, type StudyAnswer, type StudyDocument } from "./types";
 
 export const studyDocuments: StudyDocument[] = [
   {
@@ -11,7 +11,7 @@ export const studyDocuments: StudyDocument[] = [
     tags: ["osmosis", "diffusion", "membrane"],
     pageCount: 18,
     uploadedAt: "2026-07-02",
-    status: "indexed"
+    status: "ready"
   },
   {
     id: "us-history-reconstruction",

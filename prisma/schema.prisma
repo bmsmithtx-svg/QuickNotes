@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./quicknotes.dev.db"
+}
+
+model StudyDocument {
+  id               String          @id @default(cuid())
+  originalFileName String
+  storedFileName   String          @unique
+  fileSize         Int
+  mimeType         String
+  title            String
+  className        String?
+  topic            String?
+  tags             String          @default("[]")
+  uploadStatus     String          @default("uploaded")
+  pageCount        Int?
+  failureReason    String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  pages            DocumentPage[]
+  chunks           DocumentChunk[]
+
+  @@index([createdAt])
+  @@index([uploadStatus])
+}
+
+model DocumentPage {
+  id          String        @id @default(cuid())
+  documentId  String
+  pageNumber  Int
+  text        String
+  createdAt   DateTime      @default(now())
+  document    StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, pageNumber])
+  @@index([documentId, pageNumber])
+}
+
+model DocumentChunk {
+  id             String        @id @default(cuid())
+  documentId     String
+  pageNumber     Int
+  chunkIndex     Int
+  text           String
+  characterCount Int
+  tokenEstimate  Int
+  createdAt      DateTime      @default(now())
+  document       StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, pageNumber, chunkIndex])
+  @@index([documentId, pageNumber])
+}
