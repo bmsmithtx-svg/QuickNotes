@@ -5,7 +5,7 @@ import type {
   StudyDocumentDetail,
   StudyDocumentSummary,
   StudyDocumentUploadStatus
-} from "@/lib/types";
+} from "../types";
 
 export type StudyDocumentRow = {
   id: string;
@@ -131,7 +131,7 @@ export function serializeTags(tags: string) {
   return JSON.stringify(Array.from(new Set(parsedTags)));
 }
 
-function parseTags(tags: string): string[] {
+export function parseTags(tags: string): string[] {
   try {
     const parsed = JSON.parse(tags);
 

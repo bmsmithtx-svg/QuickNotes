@@ -78,6 +78,33 @@ export type SourceCitation = {
   sourceChunk: string;
 };
 
+export type ChunkSearchResult = {
+  chunkId: string;
+  documentId: string;
+  documentTitle: string;
+  originalFileName: string;
+  className: string | null;
+  topic: string | null;
+  tags: string[];
+  pageNumber: number;
+  chunkIndex: number;
+  textPreview: string;
+  score: number;
+  rank: number;
+  citation: SourceCitation;
+};
+
+export type SearchResponse = {
+  query: string;
+  filters: {
+    documentId?: string;
+    className?: string;
+    topic?: string;
+    tag?: string;
+  };
+  results: ChunkSearchResult[];
+};
+
 export type RetrievalMode = "semantic" | "keyword" | "hybrid";
 
 export type StudyAnswer = {

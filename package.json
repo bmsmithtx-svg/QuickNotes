@@ -7,7 +7,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "node -e \"import('./eslint.config.mjs').then(() => console.log('eslint config ok'))\"",
-    "typecheck": "tsc --noEmit --skipLibCheck --module esnext --moduleResolution bundler --target es2017 --jsx react-jsx --lib dom,dom.iterable,esnext --strict src/lib/types.ts src/lib/chunking.ts src/lib/chunking.test.ts src/lib/sample-data.ts src/app/layout.tsx src/app/page.tsx src/components/quicknotes-workspace.tsx",
+    "typecheck": "tsc --noEmit --skipLibCheck --module esnext --moduleResolution bundler --target es2017 --jsx react-jsx --lib dom,dom.iterable,esnext --strict src/lib/types.ts src/lib/chunking.ts src/lib/chunking.test.ts src/lib/server/db.ts src/lib/server/document-mappers.ts src/lib/server/search-index.ts src/lib/server/search-index.test.ts src/lib/sample-data.ts src/app/api/search/route.ts src/app/layout.tsx src/app/page.tsx src/components/quicknotes-workspace.tsx",
     "test:unit": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {

@@ -8,12 +8,19 @@ import {
   FileText,
   Loader2,
   RefreshCw,
+  Search,
   Tags,
   Upload
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
-import type { DocumentContentResponse, StudyDocumentSummary, StudyDocumentUploadStatus } from "../lib/types";
+import type {
+  ChunkSearchResult,
+  DocumentContentResponse,
+  SearchResponse,
+  StudyDocumentSummary,
+  StudyDocumentUploadStatus
+} from "../lib/types";
 
 type DocumentsResponse = {
   documents: StudyDocumentSummary[];
@@ -43,6 +50,11 @@ export function QuickNotesWorkspace() {
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ChunkSearchResult[]>([]);
+  const [selectedSearchResult, setSelectedSearchResult] = useState<ChunkSearchResult | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const selectedDocument = useMemo(
     () => documents.find((document) => document.id === selectedDocumentId) ?? null,
@@ -170,6 +182,51 @@ export function QuickNotesWorkspace() {
     }
   }
 
+  async function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = searchQuery.trim();
+
+    setSearchError(null);
+
+    if (!query) {
+      setSearchResults([]);
+      setSelectedSearchResult(null);
+      return;
+    }
+
+    setIsSearching(true);
+
+    try {
+      const parameters = new URLSearchParams({ q: query });
+      const response = await fetch(`/api/search?${parameters.toString()}`, {
+        cache: "no-store"
+      });
+      const payload = (await response.json()) as SearchResponse | { error?: string };
+
+      if (!response.ok || !("results" in payload)) {
+        throw new Error("error" in payload ? payload.error ?? "Search failed." : "Search failed.");
+      }
+
+      setSearchResults(payload.results);
+      setSelectedSearchResult(payload.results[0] ?? null);
+
+      if (payload.results[0]) {
+        setSelectedDocumentId(payload.results[0].documentId);
+      }
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : "Search failed.");
+      setSearchResults([]);
+      setSelectedSearchResult(null);
+    } finally {
+      setIsSearching(false);
+    }
+  }
+
+  function selectSearchResult(result: ChunkSearchResult) {
+    setSelectedSearchResult(result);
+    setSelectedDocumentId(result.documentId);
+  }
+
   return (
     <main className="min-h-screen bg-[var(--background)] px-4 py-5 text-[var(--foreground)] sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-5">
@@ -277,6 +334,57 @@ export function QuickNotesWorkspace() {
 
             <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
               <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
+                <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Search</h2>
+                <Search aria-hidden="true" size={18} className="text-[var(--accent)]" />
+              </div>
+              <form onSubmit={handleSearch} className="flex gap-2 p-4">
+                <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  type="search"
+                  placeholder="Find text in chunks"
+                  className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                  disabled={isSearching}
+                />
+                <button
+                  type="submit"
+                  className="inline-flex size-10 shrink-0 items-center justify-center rounded-md bg-[var(--foreground)] text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isSearching}
+                  title="Search chunks"
+                >
+                  {isSearching ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : <Search aria-hidden="true" size={16} />}
+                </button>
+              </form>
+              {searchError ? (
+                <p className="border-t border-[var(--border)] p-4 text-sm text-[#9b1c1c]">{searchError}</p>
+              ) : null}
+              <div className="divide-y divide-[var(--border)]">
+                {!isSearching && searchQuery.trim() && searchResults.length === 0 && !searchError ? (
+                  <p className="p-4 text-sm text-[var(--muted)]">No matching chunks.</p>
+                ) : null}
+                {searchResults.map((result) => (
+                  <button
+                    key={result.chunkId}
+                    type="button"
+                    onClick={() => selectSearchResult(result)}
+                    className={`block w-full px-4 py-3 text-left transition ${
+                      result.chunkId === selectedSearchResult?.chunkId ? "bg-[var(--panel-strong)]" : "bg-white hover:bg-[var(--panel-strong)]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3 text-xs font-semibold text-[var(--muted)]">
+                      <span>Rank {result.rank} / Score {formatScore(result.score)}</span>
+                      <span>Page {result.pageNumber} / Chunk {result.chunkIndex}</span>
+                    </div>
+                    <h3 className="mt-2 truncate text-sm font-semibold">{result.documentTitle}</h3>
+                    <p className="mt-1 truncate text-xs text-[var(--muted)]">{result.originalFileName}</p>
+                    <p className="mt-2 line-clamp-3 text-sm leading-6">{result.textPreview}</p>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+              <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
                 <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Documents</h2>
                 <FileText aria-hidden="true" size={18} className="text-[var(--accent)]" />
               </div>
@@ -294,7 +402,10 @@ export function QuickNotesWorkspace() {
                   <button
                     key={document.id}
                     type="button"
-                    onClick={() => setSelectedDocumentId(document.id)}
+                    onClick={() => {
+                      setSelectedDocumentId(document.id);
+                      setSelectedSearchResult(null);
+                    }}
                     className={`block w-full px-4 py-3 text-left transition ${
                       document.id === selectedDocumentId ? "bg-[var(--panel-strong)]" : "bg-white hover:bg-[var(--panel-strong)]"
                     }`}
@@ -325,6 +436,18 @@ export function QuickNotesWorkspace() {
               </div>
               {selectedDocument ? <StatusBadge status={selectedDocument.uploadStatus} /> : null}
             </div>
+
+            {selectedSearchResult && selectedSearchResult.documentId === selectedDocumentId ? (
+              <article className="border-b border-[var(--border)] bg-[var(--panel-strong)] p-4">
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
+                  <span>Selected search result</span>
+                  <span className="rounded-sm bg-white px-2 py-1">Page {selectedSearchResult.pageNumber}</span>
+                  <span className="rounded-sm bg-white px-2 py-1">Chunk {selectedSearchResult.chunkIndex}</span>
+                  <span>Rank {selectedSearchResult.rank} / Score {formatScore(selectedSearchResult.score)}</span>
+                </div>
+                <p className="text-sm leading-6">{selectedSearchResult.textPreview}</p>
+              </article>
+            ) : null}
 
             <div className="divide-y divide-[var(--border)]">
               {isLoadingContent ? (
@@ -444,4 +567,12 @@ function formatFileSize(bytes: number) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatScore(score: number) {
+  if (!Number.isFinite(score)) {
+    return "0";
+  }
+
+  return score.toFixed(4);
 }

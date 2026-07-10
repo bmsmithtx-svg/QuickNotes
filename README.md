@@ -10,6 +10,7 @@ The app is being built as a resume-quality AI knowledge system, not a tutorial c
 
 - Upload PDF textbooks, class notes, and study documents.
 - Extract text from PDFs and store document metadata.
+- Search uploaded chunks locally with keyword/BM25-style ranking and file/page/chunk citations.
 - Answer questions with citation-backed evidence that includes file name, page number, and exact source chunk.
 - Fall back to "not found in sources" when uploaded material does not support an answer.
 - Add hybrid retrieval with semantic/vector search plus keyword/BM25-style search.
@@ -25,6 +26,7 @@ The app is being built as a resume-quality AI knowledge system, not a tutorial c
 - Tailwind CSS
 - API routes for backend endpoints
 - Prisma with local SQLite for document metadata, page text, and chunks
+- SQLite FTS5 for local keyword retrieval over chunks
 - `pdfjs-dist` for local text-layer PDF extraction
 - OpenAI API planned for embeddings and answer generation
 
@@ -79,6 +81,47 @@ Local development data:
 
 PDF extraction is deterministic and local. It reads the embedded PDF text layer by page; scanned/image-only PDFs will need OCR later.
 
+## Retrieval Search
+
+QuickNotes now has a local keyword retrieval foundation over ingested PDF chunks. It does not generate AI answers yet.
+
+Endpoint:
+
+```text
+GET /api/search?q=mitochondria
+```
+
+Optional filters:
+
+```text
+documentId=<document id>
+class=<class name>
+topic=<topic>
+tag=<tag>
+limit=<1-50>
+```
+
+Example:
+
+```text
+GET /api/search?q=mitochondria%20ATP&class=Biology&tag=exam&limit=5
+```
+
+Response shape:
+
+- `query`: the submitted query.
+- `filters`: applied document/class/topic/tag filters.
+- `results`: ranked chunks with `chunkId`, `documentId`, `documentTitle`, `originalFileName`, `pageNumber`, `chunkIndex`, `textPreview`, `score`, `rank`, and a `citation` object containing the exact source chunk text.
+
+SQLite FTS notes and limitations:
+
+- Search uses SQLite FTS5 with `bm25()` ordering over `DocumentChunk.text`.
+- `StudyDocument`, `DocumentPage`, and `DocumentChunk` remain the source-of-truth Prisma models. The `DocumentChunkSearch` FTS table is a rebuildable mirror.
+- Upload processing syncs newly extracted chunks into the FTS table, and the search helper backfills existing chunks idempotently if the index is missing rows.
+- The current query normalizer tokenizes user input into safe keyword terms. It does not support semantic similarity, synonyms, OCR text, or answer synthesis.
+- Tag filtering is based on the current JSON-serialized `tags` field.
+- SQLite must be built with FTS5 enabled. The local `/usr/bin/sqlite3` on this machine successfully executed the FTS query smoke test.
+
 ## Development Log Process
 
 After every completed task:
@@ -129,3 +172,34 @@ Current status:
 
 Next recommended step:
 - Build retrieval search over uploaded chunks, starting with keyword/BM25-style search and document filters before adding embeddings.
+
+### 2026-07-10
+
+Changed:
+- Added a raw SQLite FTS5 migration for `DocumentChunkSearch`, a rebuildable local search mirror over chunk text.
+- Added search/index helpers for FTS table creation, idempotent backfill, document-level sync, full rebuild, query normalization, BM25 ranking, and citation-shaped result mapping.
+- Synced uploaded/extracted chunks into the search index after chunk persistence.
+- Added `GET /api/search?q=...` with optional `documentId`, `class`, `topic`, `tag`, and `limit` filters.
+- Added a workspace search panel with ranked results, document/file/page/chunk context, score display, and a selected source callout.
+- Added unit tests proving search returns expected chunk and citation metadata.
+
+Current status:
+- Local PDF ingestion remains the source-of-truth path for documents, pages, and chunks.
+- Keyword retrieval is implemented for local chunks; AI answers, embeddings, semantic search, OCR, and hybrid ranking are still not implemented.
+- `npm run test:unit` passes with 6 tests.
+- Direct SQLite FTS smoke test passes and returns the expected chunk with a BM25 score.
+- `npm run typecheck` was attempted after fixing the initial test typing errors, but the command remained silent for roughly 3 minutes and was interrupted with no diagnostics.
+- `npx prisma generate`, `./node_modules/.bin/prisma generate`, `./node_modules/.bin/prisma --version`, and `./node_modules/.bin/prisma migrate status` each remained silent for about 1 minute and were interrupted. Running Prisma outside the sandbox did not change this behavior.
+- `npm run lint` remained silent for about 1 minute after printing the npm script header and was interrupted.
+- `npm run build` still hangs before the Next build banner. In this run it printed only:
+
+```text
+> quicknotes@0.1.0 build
+> next build --webpack
+```
+
+Commit:
+- Pending until the implementation commit is created.
+
+Next recommended step:
+- Add embedding-based semantic search and hybrid ranking that combines vector similarity with the existing SQLite BM25 retrieval, then use retrieved chunks for citation-grounded answer generation.

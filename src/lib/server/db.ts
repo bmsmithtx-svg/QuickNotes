@@ -10,6 +10,8 @@ export type PrismaTransactionLike = {
   studyDocument: PrismaDelegate;
   documentPage: PrismaDelegate;
   documentChunk: PrismaDelegate;
+  $executeRawUnsafe: (query: string, ...values: unknown[]) => Promise<number>;
+  $queryRawUnsafe: <Result = unknown>(query: string, ...values: unknown[]) => Promise<Result>;
 };
 
 export type PrismaClientLike = PrismaTransactionLike & {

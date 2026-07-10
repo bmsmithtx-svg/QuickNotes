@@ -34,7 +34,7 @@ pnpm-debug.log*
 uploads/
 storage/
 data/
-documents/
+/documents/
 extracted/
 embeddings/
 .vector/
