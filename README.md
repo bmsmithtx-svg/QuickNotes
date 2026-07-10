@@ -199,7 +199,7 @@ Current status:
 ```
 
 Commit:
-- Pending until the implementation commit is created.
+- `6ba3181` - Added local SQLite FTS chunk search, citation-shaped results, workspace search UI, and retrieval helper tests.
 
 Next recommended step:
 - Add embedding-based semantic search and hybrid ranking that combines vector similarity with the existing SQLite BM25 retrieval, then use retrieved chunks for citation-grounded answer generation.
