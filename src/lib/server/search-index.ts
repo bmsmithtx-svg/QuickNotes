@@ -31,8 +31,8 @@ type SearchRow = {
   score: number;
 };
 
-const DEFAULT_SEARCH_LIMIT = 10;
-const MAX_SEARCH_LIMIT = 50;
+export const DEFAULT_SEARCH_LIMIT = 10;
+export const MAX_SEARCH_LIMIT = 50;
 const MAX_FTS_TERMS = 12;
 const PREVIEW_LENGTH = 320;
 
@@ -135,7 +135,7 @@ export async function searchChunks(db: PrismaTransactionLike, input: SearchChunk
   }
 
   const whereClause = filters.length > 0 ? `AND ${filters.join(" AND ")}` : "";
-  const limit = clampLimit(input.limit);
+  const limit = clampSearchLimit(input.limit);
   parameters.push(limit);
 
   const rows = await db.$queryRawUnsafe<SearchRow[]>(
@@ -159,7 +159,7 @@ export async function searchChunks(db: PrismaTransactionLike, input: SearchChunk
         ON document."id" = chunk."documentId"
       WHERE "DocumentChunkSearch" MATCH ?
       ${whereClause}
-      ORDER BY bm25("DocumentChunkSearch") ASC, chunk."pageNumber" ASC, chunk."chunkIndex" ASC
+      ORDER BY bm25("DocumentChunkSearch") ASC, chunk."documentId" ASC, chunk."pageNumber" ASC, chunk."chunkIndex" ASC, chunk."id" ASC
       LIMIT ?
     `,
     ...parameters
@@ -199,6 +199,13 @@ function mapSearchRows(rows: SearchRow[]): ChunkSearchResult[] {
     textPreview: buildTextPreview(row.text),
     score: Number(row.score),
     rank: index + 1,
+    ranking: {
+      mode: "keyword",
+      finalRank: index + 1,
+      finalScore: Number(row.score),
+      keywordRank: index + 1,
+      keywordScore: Number(row.score)
+    },
     citation: {
       id: row.chunkId,
       fileName: row.originalFileName,
@@ -209,7 +216,7 @@ function mapSearchRows(rows: SearchRow[]): ChunkSearchResult[] {
   }));
 }
 
-function buildTextPreview(text: string) {
+export function buildTextPreview(text: string) {
   const normalizedText = text.replace(/\s+/g, " ").trim();
 
   if (normalizedText.length <= PREVIEW_LENGTH) {
@@ -219,7 +226,7 @@ function buildTextPreview(text: string) {
   return `${normalizedText.slice(0, PREVIEW_LENGTH - 1).trimEnd()}...`;
 }
 
-function clampLimit(limit: number | undefined) {
+export function clampSearchLimit(limit: number | undefined) {
   if (!Number.isFinite(limit)) {
     return DEFAULT_SEARCH_LIMIT;
   }
@@ -227,6 +234,6 @@ function clampLimit(limit: number | undefined) {
   return Math.min(Math.max(Math.trunc(limit ?? DEFAULT_SEARCH_LIMIT), 1), MAX_SEARCH_LIMIT);
 }
 
-function escapeLikePattern(value: string) {
+export function escapeLikePattern(value: string) {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);
 }

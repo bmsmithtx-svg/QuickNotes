@@ -16,6 +16,7 @@ export type PrismaTransactionLike = {
 
 export type PrismaClientLike = PrismaTransactionLike & {
   $transaction: <Result>(callback: (transaction: PrismaTransactionLike) => Promise<Result>) => Promise<Result>;
+  $disconnect?: () => Promise<void>;
 };
 
 const globalForPrisma = globalThis as unknown as {

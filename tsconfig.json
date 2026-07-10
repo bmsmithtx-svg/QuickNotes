@@ -23,13 +23,10 @@
       ]
     }
   },
-  "files": [
-    "src/lib/types.ts",
-    "src/lib/chunking.ts",
-    "src/lib/chunking.test.ts",
-    "src/lib/sample-data.ts",
-    "src/app/layout.tsx",
-    "src/app/page.tsx",
-    "src/components/quicknotes-workspace.tsx"
+  "include": [
+    "next-env.d.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "scripts/**/*.ts"
   ]
 }

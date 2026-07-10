@@ -16,14 +16,25 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 
 import type {
   ChunkSearchResult,
+  DocumentUploadResponse,
   DocumentContentResponse,
+  RetrievalMode,
   SearchResponse,
+  SearchModeAvailability,
   StudyDocumentSummary,
   StudyDocumentUploadStatus
 } from "../lib/types";
 
 type DocumentsResponse = {
   documents: StudyDocumentSummary[];
+};
+
+type SearchErrorPayload = {
+  error?: string;
+  requestedMode?: RetrievalMode | "auto";
+  mode?: RetrievalMode;
+  actualMode?: RetrievalMode;
+  semantic?: SearchModeAvailability;
 };
 
 const statusLabels: Record<StudyDocumentUploadStatus, string> = {
@@ -40,6 +51,12 @@ const statusStyles: Record<StudyDocumentUploadStatus, string> = {
   failed: "bg-[#fde8e8] text-[#9b1c1c]"
 };
 
+const searchModeOptions: Array<{ mode: RetrievalMode; label: string }> = [
+  { mode: "hybrid", label: "Hybrid" },
+  { mode: "semantic", label: "Semantic" },
+  { mode: "keyword", label: "Keyword" }
+];
+
 export function QuickNotesWorkspace() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<StudyDocumentSummary[]>([]);
@@ -51,8 +68,13 @@ export function QuickNotesWorkspace() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<RetrievalMode>("hybrid");
   const [searchResults, setSearchResults] = useState<ChunkSearchResult[]>([]);
   const [selectedSearchResult, setSelectedSearchResult] = useState<ChunkSearchResult | null>(null);
+  const [searchMetadata, setSearchMetadata] = useState<Pick<
+    SearchResponse,
+    "requestedMode" | "mode" | "actualMode" | "semantic" | "resultCount" | "ranking"
+  > | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
@@ -64,7 +86,7 @@ export function QuickNotesWorkspace() {
   const loadDocuments = useCallback(async (nextSelectedId?: string) => {
     setIsLoadingDocuments(true);
     try {
-    const response = await fetch("/api/documents/list", {
+      const response = await fetch("/api/documents/list", {
         cache: "no-store"
       });
 
@@ -165,14 +187,14 @@ export function QuickNotesWorkspace() {
         method: "POST",
         body: formData
       });
-      const payload = (await response.json()) as { documentId?: string; error?: string; pageCount?: number; chunkCount?: number };
+      const payload = (await response.json()) as Partial<DocumentUploadResponse> & { error?: string };
 
       if (!response.ok || !payload.documentId) {
         throw new Error(payload.error ?? "Upload failed.");
       }
 
       form.reset();
-      setUploadMessage(`Ready: ${payload.pageCount ?? 0} pages, ${payload.chunkCount ?? 0} chunks.`);
+      setUploadMessage(formatUploadMessage(payload));
       await loadDocuments(payload.documentId);
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "Upload failed.");
@@ -191,23 +213,46 @@ export function QuickNotesWorkspace() {
     if (!query) {
       setSearchResults([]);
       setSelectedSearchResult(null);
+      setSearchMetadata(null);
       return;
     }
 
     setIsSearching(true);
+    setSearchMetadata(null);
 
     try {
-      const parameters = new URLSearchParams({ q: query });
+      const parameters = new URLSearchParams({ q: query, mode: searchMode });
       const response = await fetch(`/api/search?${parameters.toString()}`, {
         cache: "no-store"
       });
-      const payload = (await response.json()) as SearchResponse | { error?: string };
+      const payload = (await response.json()) as SearchResponse | SearchErrorPayload;
 
       if (!response.ok || !("results" in payload)) {
+        if ("semantic" in payload && payload.semantic) {
+          setSearchMetadata({
+            requestedMode: payload.requestedMode ?? searchMode,
+            mode: payload.mode ?? "keyword",
+            actualMode: payload.actualMode ?? "keyword",
+            semantic: payload.semantic,
+            resultCount: 0,
+            ranking: {
+              formula: ""
+            }
+          });
+        }
+
         throw new Error("error" in payload ? payload.error ?? "Search failed." : "Search failed.");
       }
 
       setSearchResults(payload.results);
+      setSearchMetadata({
+        requestedMode: payload.requestedMode,
+        mode: payload.mode,
+        actualMode: payload.actualMode,
+        semantic: payload.semantic,
+        resultCount: payload.resultCount,
+        ranking: payload.ranking
+      });
       setSelectedSearchResult(payload.results[0] ?? null);
 
       if (payload.results[0]) {
@@ -217,6 +262,7 @@ export function QuickNotesWorkspace() {
       setSearchError(error instanceof Error ? error.message : "Search failed.");
       setSearchResults([]);
       setSelectedSearchResult(null);
+      setSearchMetadata((currentMetadata) => (currentMetadata?.resultCount === 0 ? currentMetadata : null));
     } finally {
       setIsSearching(false);
     }
@@ -337,24 +383,42 @@ export function QuickNotesWorkspace() {
                 <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Search</h2>
                 <Search aria-hidden="true" size={18} className="text-[var(--accent)]" />
               </div>
-              <form onSubmit={handleSearch} className="flex gap-2 p-4">
-                <input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  type="search"
-                  placeholder="Find text in chunks"
-                  className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
-                  disabled={isSearching}
-                />
-                <button
-                  type="submit"
-                  className="inline-flex size-10 shrink-0 items-center justify-center rounded-md bg-[var(--foreground)] text-white disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isSearching}
-                  title="Search chunks"
-                >
-                  {isSearching ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : <Search aria-hidden="true" size={16} />}
-                </button>
+              <form onSubmit={handleSearch} className="flex flex-col gap-3 p-4">
+                <div className="grid grid-cols-3 rounded-md border border-[var(--border)] bg-white p-1" role="radiogroup" aria-label="Search mode">
+                  {searchModeOptions.map((option) => (
+                    <button
+                      key={option.mode}
+                      type="button"
+                      onClick={() => setSearchMode(option.mode)}
+                      className={`h-8 rounded-sm text-xs font-semibold ${
+                        searchMode === option.mode ? "bg-[var(--foreground)] text-white" : "text-[var(--muted)]"
+                      }`}
+                      aria-pressed={searchMode === option.mode}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    type="search"
+                    placeholder="Find text in chunks"
+                    className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                    disabled={isSearching}
+                  />
+                  <button
+                    type="submit"
+                    className="inline-flex size-10 shrink-0 items-center justify-center rounded-md bg-[var(--foreground)] text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSearching}
+                    title="Search chunks"
+                  >
+                    {isSearching ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : <Search aria-hidden="true" size={16} />}
+                  </button>
+                </div>
               </form>
+              {searchMetadata ? <SearchModeNotice metadata={searchMetadata} selectedMode={searchMode} /> : null}
               {searchError ? (
                 <p className="border-t border-[var(--border)] p-4 text-sm text-[#9b1c1c]">{searchError}</p>
               ) : null}
@@ -372,8 +436,15 @@ export function QuickNotesWorkspace() {
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3 text-xs font-semibold text-[var(--muted)]">
-                      <span>Rank {result.rank} / Score {formatScore(result.score)}</span>
+                      <span>{formatPrimaryRanking(result)}</span>
                       <span>Page {result.pageNumber} / Chunk {result.chunkIndex}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold text-[var(--muted)]">
+                      {formatRankingBadges(result).map((badge) => (
+                        <span key={badge} className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">
+                          {badge}
+                        </span>
+                      ))}
                     </div>
                     <h3 className="mt-2 truncate text-sm font-semibold">{result.documentTitle}</h3>
                     <p className="mt-1 truncate text-xs text-[var(--muted)]">{result.originalFileName}</p>
@@ -443,7 +514,14 @@ export function QuickNotesWorkspace() {
                   <span>Selected search result</span>
                   <span className="rounded-sm bg-white px-2 py-1">Page {selectedSearchResult.pageNumber}</span>
                   <span className="rounded-sm bg-white px-2 py-1">Chunk {selectedSearchResult.chunkIndex}</span>
-                  <span>Rank {selectedSearchResult.rank} / Score {formatScore(selectedSearchResult.score)}</span>
+                  <span>{formatPrimaryRanking(selectedSearchResult)}</span>
+                </div>
+                <div className="mb-3 flex flex-wrap gap-2 text-[11px] font-semibold text-[var(--muted)]">
+                  {formatRankingBadges(selectedSearchResult).map((badge) => (
+                    <span key={badge} className="rounded-sm bg-white px-2 py-1">
+                      {badge}
+                    </span>
+                  ))}
                 </div>
                 <p className="text-sm leading-6">{selectedSearchResult.textPreview}</p>
               </article>
@@ -534,6 +612,79 @@ export function QuickNotesWorkspace() {
       </div>
     </main>
   );
+}
+
+function SearchModeNotice({
+  metadata,
+  selectedMode
+}: {
+  metadata: Pick<SearchResponse, "requestedMode" | "mode" | "actualMode" | "semantic" | "resultCount" | "ranking">;
+  selectedMode: RetrievalMode;
+}) {
+  if (metadata.semantic.semanticAvailable) {
+    return (
+      <p className="border-t border-[var(--border)] px-4 py-3 text-xs text-[var(--muted)]">
+        Using {metadata.actualMode} search. {metadata.resultCount} result{metadata.resultCount === 1 ? "" : "s"}.
+      </p>
+    );
+  }
+
+  if (selectedMode === "keyword") {
+    return null;
+  }
+
+  const message =
+    metadata.semantic.reason === "missing_api_key"
+      ? "Semantic search is unavailable because OPENAI_API_KEY is not configured. Keyword search still works."
+      : `No stored embeddings found for ${metadata.semantic.model}. Run npm run embeddings:backfill after configuring the API key.`;
+
+  return <p className="border-t border-[var(--border)] px-4 py-3 text-xs text-[var(--muted)]">{message}</p>;
+}
+
+function formatUploadMessage(payload: Partial<DocumentUploadResponse>) {
+  const base = `Ready: ${payload.pageCount ?? 0} pages, ${payload.chunkCount ?? 0} chunks.`;
+
+  if (payload.embeddingStatus === "complete") {
+    return `${base} Embeddings complete.`;
+  }
+
+  if (payload.embeddingStatus === "failed") {
+    return `${base} Embeddings failed; run npm run embeddings:backfill after fixing configuration.`;
+  }
+
+  if (payload.embeddingStatus === "skipped_missing_api_key") {
+    return `${base} Keyword search is available; semantic search needs OPENAI_API_KEY and backfill.`;
+  }
+
+  return base;
+}
+
+function formatPrimaryRanking(result: ChunkSearchResult) {
+  const label = result.ranking.mode === "hybrid" ? "Final" : result.ranking.mode === "semantic" ? "Semantic" : "Keyword";
+
+  return `${label} rank ${result.rank} / ${formatScore(result.score)}`;
+}
+
+function formatRankingBadges(result: ChunkSearchResult) {
+  const badges: string[] = [];
+
+  if (result.ranking.keywordRank) {
+    badges.push(`Keyword #${result.ranking.keywordRank}`);
+  }
+
+  if (typeof result.ranking.semanticSimilarity === "number") {
+    badges.push(`Similarity ${formatScore(result.ranking.semanticSimilarity)}`);
+  }
+
+  if (result.ranking.semanticRank) {
+    badges.push(`Semantic #${result.ranking.semanticRank}`);
+  }
+
+  if (result.ranking.mode === "hybrid") {
+    badges.unshift(`RRF ${formatScore(result.ranking.finalScore)}`);
+  }
+
+  return badges;
 }
 
 function StatusBadge({ status }: { status: StudyDocumentUploadStatus }) {

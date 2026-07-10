@@ -68,6 +68,8 @@ export type DocumentUploadResponse = {
   pageCount: number;
   chunkCount: number;
   status: StudyDocumentUploadStatus;
+  embeddingStatus?: "skipped_missing_api_key" | "complete" | "failed";
+  embeddingError?: string;
 };
 
 export type SourceCitation = {
@@ -91,11 +93,35 @@ export type ChunkSearchResult = {
   textPreview: string;
   score: number;
   rank: number;
+  ranking: {
+    mode: RetrievalMode;
+    finalRank: number;
+    finalScore: number;
+    keywordRank?: number;
+    keywordScore?: number;
+    semanticRank?: number;
+    semanticSimilarity?: number;
+  };
   citation: SourceCitation;
+};
+
+export type SearchModeAvailability = {
+  semanticAvailable: boolean;
+  reason?: "missing_api_key" | "missing_embeddings";
+  model: string;
 };
 
 export type SearchResponse = {
   query: string;
+  requestedMode: RetrievalMode | "auto";
+  mode: RetrievalMode;
+  actualMode: RetrievalMode;
+  semantic: SearchModeAvailability;
+  resultCount: number;
+  ranking: {
+    formula: string;
+    rrfK?: number;
+  };
   filters: {
     documentId?: string;
     className?: string;

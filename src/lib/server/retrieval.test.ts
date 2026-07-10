@@ -1,0 +1,172 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import { getEmbeddingRuntimeConfig, requireEmbeddingRuntimeConfig } from "./embedding-config";
+import type { PrismaTransactionLike } from "./db";
+import { resolveSearchMode, searchHybridChunks, searchSemanticChunks } from "./retrieval";
+
+const delegate = {
+  findMany: async () => [],
+  findUnique: async () => null,
+  create: async () => ({}),
+  update: async () => ({}),
+  createMany: async () => ({})
+};
+
+type FakeRow = {
+  chunkId: string;
+  documentId: string;
+  documentTitle: string;
+  originalFileName: string;
+  className: string | null;
+  topic: string | null;
+  tags: string;
+  pageNumber: number;
+  chunkIndex: number;
+  text: string;
+};
+
+function createDb({
+  keywordRows = [],
+  semanticRows = []
+}: {
+  keywordRows?: Array<FakeRow & { score: number }>;
+  semanticRows?: Array<FakeRow & { dimensions: number; vectorJson: string }>;
+}): PrismaTransactionLike {
+  return {
+    studyDocument: delegate,
+    documentPage: delegate,
+    documentChunk: delegate,
+    $executeRawUnsafe: async () => 0,
+    $queryRawUnsafe: async <Result = unknown>(query: string) => {
+      if (query.includes("DocumentChunkEmbedding")) {
+        return semanticRows as Result;
+      }
+
+      return keywordRows as Result;
+    }
+  };
+}
+
+const embeddingService = {
+  model: "test-embedding",
+  embedTexts: async () => [[1, 0]]
+};
+
+describe("semantic retrieval", () => {
+  it("ranks chunks by cosine similarity and preserves citation metadata", async () => {
+    const db = createDb({
+      semanticRows: [
+        semanticRow("chunk_b", "doc_1", 1, 2, [0, 1], "Irrelevant plant cell text."),
+        semanticRow("chunk_a", "doc_1", 1, 1, [1, 0], "Mitochondria make ATP."),
+        semanticRow("chunk_c", "doc_1", 2, 1, [1, 0], "ATP is stored and used.")
+      ]
+    });
+
+    const results = await searchSemanticChunks(db, { query: "ATP", limit: 3 }, embeddingService);
+
+    assert.deepEqual(results.map((result) => result.chunkId), ["chunk_a", "chunk_c", "chunk_b"]);
+    assert.equal(results[0].ranking.semanticRank, 1);
+    assert.equal(results[0].ranking.semanticSimilarity, 1);
+    assert.equal(results[0].documentId, "doc_1");
+    assert.equal(results[0].originalFileName, "notes.pdf");
+    assert.equal(results[0].pageNumber, 1);
+    assert.equal(results[0].chunkIndex, 1);
+    assert.deepEqual(results[0].citation, {
+      id: "chunk_a",
+      fileName: "notes.pdf",
+      pageNumber: 1,
+      chunkIndex: 1,
+      sourceChunk: "Mitochondria make ATP."
+    });
+  });
+});
+
+describe("hybrid retrieval", () => {
+  it("deduplicates chunks and combines keyword and semantic ranks with RRF", async () => {
+    const db = createDb({
+      keywordRows: [
+        keywordRow("chunk_b", 1, 2, 9),
+        keywordRow("chunk_a", 1, 1, 8)
+      ],
+      semanticRows: [
+        semanticRow("chunk_a", "doc_1", 1, 1, [1, 0], "Mitochondria make ATP."),
+        semanticRow("chunk_c", "doc_1", 2, 1, [1, 0], "ATP is stored and used."),
+        semanticRow("chunk_b", "doc_1", 1, 2, [0, 1], "Keyword-only ATP mention.")
+      ]
+    });
+
+    const results = await searchHybridChunks(db, { query: "ATP", limit: 3 }, embeddingService);
+
+    assert.deepEqual(results.map((result) => result.chunkId), ["chunk_a", "chunk_b", "chunk_c"]);
+    assert.equal(new Set(results.map((result) => result.chunkId)).size, results.length);
+    assert.equal(results[0].ranking.keywordRank, 2);
+    assert.equal(results[0].ranking.keywordScore, 8);
+    assert.equal(results[0].ranking.semanticRank, 1);
+    assert.equal(results[0].ranking.semanticSimilarity, 1);
+    assert.equal(results[0].ranking.mode, "hybrid");
+    assert.equal(results[0].rank, 1);
+    assert.equal(results[0].score, results[0].ranking.finalScore);
+  });
+
+  it("uses deterministic ordering when final RRF scores tie", async () => {
+    const db = createDb({
+      keywordRows: [keywordRow("chunk_keyword", 1, 1, 4)],
+      semanticRows: [semanticRow("chunk_semantic", "doc_1", 1, 2, [1, 0], "Semantic only match.")]
+    });
+
+    const results = await searchHybridChunks(db, { query: "ATP", limit: 2 }, embeddingService);
+
+    assert.deepEqual(results.map((result) => result.chunkId), ["chunk_keyword", "chunk_semantic"]);
+    assert.equal(results[0].ranking.finalScore, results[1].ranking.finalScore);
+  });
+});
+
+describe("search mode availability", () => {
+  it("defaults to keyword when semantic retrieval is unavailable", () => {
+    assert.equal(resolveSearchMode({ requestedMode: null, semanticAvailable: false }), "keyword");
+    assert.equal(resolveSearchMode({ requestedMode: null, semanticAvailable: true }), "hybrid");
+  });
+
+  it("reports missing API key without requiring network access", () => {
+    assert.equal(getEmbeddingRuntimeConfig({}).model, "text-embedding-3-small");
+    assert.throws(() => requireEmbeddingRuntimeConfig({}), /OPENAI_API_KEY is required/);
+  });
+});
+
+function keywordRow(chunkId: string, pageNumber: number, chunkIndex: number, score: number): FakeRow & { score: number } {
+  return {
+    ...baseRow(chunkId, pageNumber, chunkIndex, `${chunkId} keyword text.`),
+    score
+  };
+}
+
+function semanticRow(
+  chunkId: string,
+  documentId: string,
+  pageNumber: number,
+  chunkIndex: number,
+  vector: number[],
+  text: string
+): FakeRow & { dimensions: number; vectorJson: string } {
+  return {
+    ...baseRow(chunkId, pageNumber, chunkIndex, text, documentId),
+    dimensions: vector.length,
+    vectorJson: JSON.stringify(vector)
+  };
+}
+
+function baseRow(chunkId: string, pageNumber: number, chunkIndex: number, text: string, documentId = "doc_1"): FakeRow {
+  return {
+    chunkId,
+    documentId,
+    documentTitle: "Cell Energy Notes",
+    originalFileName: "notes.pdf",
+    className: "Biology",
+    topic: "cells",
+    tags: '["exam"]',
+    pageNumber,
+    chunkIndex,
+    text
+  };
+}

@@ -51,7 +51,23 @@ model DocumentChunk {
   tokenEstimate  Int
   createdAt      DateTime      @default(now())
   document       StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  embedding      DocumentChunkEmbedding?
 
   @@unique([documentId, pageNumber, chunkIndex])
   @@index([documentId, pageNumber])
+}
+
+model DocumentChunkEmbedding {
+  id             String        @id @default(cuid())
+  chunkId        String        @unique
+  embeddingModel String
+  dimensions     Int
+  vectorJson     String
+  contentHash    String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  chunk          DocumentChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  @@index([embeddingModel])
+  @@index([contentHash])
 }

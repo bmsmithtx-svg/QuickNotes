@@ -21,6 +21,7 @@ pnpm-debug.log*
 # local environment and secrets
 .env
 .env.*
+!.env.example
 
 # local databases and generated data
 *.db

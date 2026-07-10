@@ -6,10 +6,13 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { chunkPageText } from "@/lib/chunking";
+import { getEmbeddingRuntimeConfig } from "@/lib/server/embedding-config";
+import { createOpenAIEmbeddingService } from "@/lib/server/embedding-service";
+import { syncChunkEmbeddings, type EmbeddingSyncResult } from "@/lib/server/embedding-sync";
 import { serializeTags } from "@/lib/server/document-mappers";
 import { getPrisma } from "@/lib/server/db";
 import { extractPdfTextByPage } from "@/lib/server/pdf-extraction";
-import { ensureChunkSearchIndex, syncDocumentSearchIndex } from "@/lib/server/search-index";
+import { ensureChunkSearchIndex, syncDocumentSearchIndex, type SearchIndexChunk } from "@/lib/server/search-index";
 import { ensureLocalStorage, getStoredPdfPath } from "@/lib/server/storage";
 
 export const runtime = "nodejs";
@@ -92,6 +95,7 @@ export async function POST(request: Request) {
         text: page.text
       })
     );
+    let searchableChunks: SearchIndexChunk[] = [];
 
     await ensureChunkSearchIndex(prisma);
 
@@ -108,7 +112,7 @@ export async function POST(request: Request) {
         });
       }
 
-      const searchableChunks = await transaction.documentChunk.findMany({
+      searchableChunks = (await transaction.documentChunk.findMany({
         where: {
           documentId: document.id
         },
@@ -117,7 +121,7 @@ export async function POST(request: Request) {
           documentId: true,
           text: true
         }
-      });
+      })) as SearchIndexChunk[];
 
       await syncDocumentSearchIndex(transaction, document.id, searchableChunks);
 
@@ -132,6 +136,7 @@ export async function POST(request: Request) {
         }
       });
     });
+    const embeddingOutcome = await syncUploadedDocumentEmbeddings(prisma, document.id, searchableChunks);
 
     return NextResponse.json(
       {
@@ -139,7 +144,9 @@ export async function POST(request: Request) {
         originalFileName,
         pageCount: extractedPdf.pageCount,
         chunkCount: chunkRows.length,
-        status: "ready"
+        status: "ready",
+        embeddingStatus: embeddingOutcome.embeddingStatus,
+        embeddingError: embeddingOutcome.embeddingError
       },
       { status: 201 }
     );
@@ -157,6 +164,65 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+async function syncUploadedDocumentEmbeddings(
+  prisma: Awaited<ReturnType<typeof getPrisma>>,
+  documentId: string,
+  chunks: SearchIndexChunk[]
+): Promise<{
+  embeddingStatus: "skipped_missing_api_key" | "complete" | "failed";
+  embeddingError?: string;
+  result?: EmbeddingSyncResult;
+}> {
+  const config = getEmbeddingRuntimeConfig();
+
+  if (chunks.length === 0) {
+    return {
+      embeddingStatus: "complete"
+    };
+  }
+
+  if (!config.apiKey) {
+    return {
+      embeddingStatus: "skipped_missing_api_key"
+    };
+  }
+
+  const embeddingService = createOpenAIEmbeddingService({
+    apiKey: config.apiKey,
+    model: config.model
+  });
+  const result = await syncChunkEmbeddings(prisma, chunks, embeddingService, {
+    mode: "stale"
+  });
+
+  if (result.failed > 0) {
+    const embeddingError =
+      result.errorMessage ??
+      "Embedding generation failed after PDF extraction. Run npm run embeddings:backfill after fixing the embedding configuration.";
+
+    await prisma.studyDocument.update({
+      where: {
+        id: documentId
+      },
+      data: {
+        uploadStatus: "ready",
+        failureReason: `PDF extraction succeeded, but embedding generation failed for ${result.failed} chunk(s). ${embeddingError}`
+      }
+    });
+
+    return {
+      embeddingStatus: "failed",
+      embeddingError,
+      result
+    };
+  }
+
+  return {
+    embeddingStatus: "complete",
+    result
+  };
 }
 
 async function markDocumentFailed(documentId: string) {

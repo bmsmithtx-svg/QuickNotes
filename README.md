@@ -10,10 +10,10 @@ The app is being built as a resume-quality AI knowledge system, not a tutorial c
 
 - Upload PDF textbooks, class notes, and study documents.
 - Extract text from PDFs and store document metadata.
-- Search uploaded chunks locally with keyword/BM25-style ranking and file/page/chunk citations.
+- Search uploaded chunks locally with keyword, semantic, and hybrid retrieval plus file/page/chunk citations.
 - Answer questions with citation-backed evidence that includes file name, page number, and exact source chunk.
 - Fall back to "not found in sources" when uploaded material does not support an answer.
-- Add hybrid retrieval with semantic/vector search plus keyword/BM25-style search.
+- Use hybrid retrieval with semantic/vector search plus keyword/BM25-style search.
 - Filter documents by class, topic, date, source, and tag.
 - Add evaluation tests for retrieval accuracy, citation accuracy, and answer faithfulness.
 - Deploy the full app after the local upload, database, retrieval, and answer flows are stable.
@@ -28,7 +28,7 @@ The app is being built as a resume-quality AI knowledge system, not a tutorial c
 - Prisma with local SQLite for document metadata, page text, and chunks
 - SQLite FTS5 for local keyword retrieval over chunks
 - `pdfjs-dist` for local text-layer PDF extraction
-- OpenAI API planned for embeddings and answer generation
+- OpenAI API for embeddings, with answer generation planned next
 
 ## Current Structure
 
@@ -61,12 +61,24 @@ Run the development server:
 npm run dev
 ```
 
+Optional OpenAI embedding configuration:
+
+```bash
+cp .env.example .env
+# Add a real key locally. Do not commit .env.
+OPENAI_API_KEY=...
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+```
+
+`OPENAI_API_KEY` enables upload-time embeddings, semantic search, and hybrid search. Without it, uploads, document browsing, and keyword search remain usable. `OPENAI_EMBEDDING_MODEL` defaults to `text-embedding-3-small` and can be changed before running backfill; changing the model marks existing chunk embeddings stale.
+
 Run checks:
 
 ```bash
 npm run lint
 npm run typecheck
 npm run test:unit
+npm run smoke:retrieval
 npm run build
 ```
 
@@ -83,7 +95,7 @@ PDF extraction is deterministic and local. It reads the embedded PDF text layer 
 
 ## Retrieval Search
 
-QuickNotes now has a local keyword retrieval foundation over ingested PDF chunks. It does not generate AI answers yet.
+QuickNotes now supports local keyword retrieval, semantic retrieval, and deterministic hybrid retrieval over ingested PDF chunks. It does not generate AI answers yet.
 
 Endpoint:
 
@@ -99,28 +111,89 @@ class=<class name>
 topic=<topic>
 tag=<tag>
 limit=<1-50>
+mode=<keyword|semantic|hybrid>
 ```
 
-Example:
+Examples:
 
 ```text
-GET /api/search?q=mitochondria%20ATP&class=Biology&tag=exam&limit=5
+GET /api/search?q=mitochondria%20ATP&class=Biology&tag=exam&limit=5&mode=hybrid
+GET /api/search?q=cellular%20respiration&mode=semantic
+GET /api/search?q=ATP&mode=keyword
 ```
 
 Response shape:
 
 - `query`: the submitted query.
+- `requestedMode`: `auto` when no mode was supplied, otherwise `keyword`, `semantic`, or `hybrid`.
+- `mode` / `actualMode`: the retrieval mode actually used.
+- `semantic`: availability metadata with the embedding model and missing-key/missing-embedding reason when unavailable.
+- `resultCount`: number of returned chunks.
+- `ranking`: ranking formula metadata.
 - `filters`: applied document/class/topic/tag filters.
-- `results`: ranked chunks with `chunkId`, `documentId`, `documentTitle`, `originalFileName`, `pageNumber`, `chunkIndex`, `textPreview`, `score`, `rank`, and a `citation` object containing the exact source chunk text.
+- `results`: ranked chunks with `chunkId`, `documentId`, `documentTitle`, `originalFileName`, `pageNumber`, `chunkIndex`, `textPreview`, backward-compatible `score` and `rank`, detailed `ranking` metadata, and a `citation` object containing the exact source chunk text.
 
-SQLite FTS notes and limitations:
+Keyword retrieval:
 
 - Search uses SQLite FTS5 with `bm25()` ordering over `DocumentChunk.text`.
 - `StudyDocument`, `DocumentPage`, and `DocumentChunk` remain the source-of-truth Prisma models. The `DocumentChunkSearch` FTS table is a rebuildable mirror.
 - Upload processing syncs newly extracted chunks into the FTS table, and the search helper backfills existing chunks idempotently if the index is missing rows.
-- The current query normalizer tokenizes user input into safe keyword terms. It does not support semantic similarity, synonyms, OCR text, or answer synthesis.
-- Tag filtering is based on the current JSON-serialized `tags` field.
-- SQLite must be built with FTS5 enabled. The local `/usr/bin/sqlite3` on this machine successfully executed the FTS query smoke test.
+- The query normalizer tokenizes user input into safe keyword terms.
+
+Semantic retrieval architecture:
+
+- `DocumentChunkEmbedding` stores one embedding row per chunk with `chunkId`, `embeddingModel`, `dimensions`, JSON-serialized normalized vector data, `contentHash`, and timestamps.
+- `contentHash` is a SHA-256 hash of exact chunk text. A chunk is skipped when the stored hash and model match; it is re-embedded when either changes.
+- `src/lib/server/embedding-service.ts` isolates OpenAI API calls, batching, response validation, vector normalization, and typed error handling.
+- Retrieval code receives an injected embedding service, so ranking tests use deterministic fake vectors and never call the network.
+- The current SQLite implementation scans stored vectors in-process and ranks with cosine similarity. The interface is isolated so a later vector index can replace the scan.
+
+Hybrid search architecture:
+
+- Keyword and semantic candidates are fetched separately.
+- Results are deduplicated by `chunkId`.
+- Hybrid scoring uses Reciprocal Rank Fusion: `score = sum(1 / (60 + rank)) over keyword and semantic ranks`.
+- Raw BM25 and cosine scores are not directly added.
+- Ties are deterministic: final score desc, keyword rank asc, semantic rank asc, semantic similarity desc, document ID asc, page asc, chunk index asc, chunk ID asc.
+- Hybrid results preserve `keywordRank`, `keywordScore`, `semanticRank`, `semanticSimilarity`, final rank, final score, and citation metadata.
+
+Embedding backfill and rebuild:
+
+```bash
+npm run embeddings:backfill  # missing or stale embeddings
+npm run embeddings:missing   # only chunks with no embedding row
+npm run embeddings:rebuild   # force all chunks to be re-embedded
+```
+
+The commands report `processed`, `skipped`, `succeeded`, and `failed` counts. They require `OPENAI_API_KEY`; without it they fail before doing work with a clear missing-key message.
+
+Missing-key and recovery behavior:
+
+- Uploads, document previews, and keyword search do not require an OpenAI key.
+- When no key is configured, upload-time embedding is skipped and the response reports `embeddingStatus: "skipped_missing_api_key"`.
+- If PDF extraction and FTS indexing succeed but embedding generation fails, the document remains `ready`; `failureReason` records that embeddings failed, and `npm run embeddings:backfill` can recover without re-upload.
+- Explicit `mode=semantic` or `mode=hybrid` returns a clear error when the key or stored embeddings are missing. Auto mode falls back to keyword unless semantic retrieval is available.
+
+Privacy considerations:
+
+- API keys are read only from environment variables and are never logged.
+- Full private document content is not logged by embedding or retrieval helpers.
+- Uploaded PDFs, local SQLite databases, extracted data, and embedding artifacts remain ignored by git.
+
+Migration notes:
+
+- New migration: `prisma/migrations/20260710143000_add_chunk_embeddings/migration.sql`.
+- The migration creates `DocumentChunkEmbedding` with a unique `chunkId`, model/hash indexes, JSON vector storage, and cascade delete from `DocumentChunk`.
+- Run `npx prisma migrate dev` in a healthy Prisma runtime, then `npx prisma generate`.
+- In this local runtime, Prisma CLI commands still hang silently; the migration SQL was applied directly to `prisma/quicknotes.dev.db` with `/usr/bin/sqlite3` for verification.
+
+Current limitations:
+
+- Semantic scan is in-process over SQLite rows, so it is intended for local/small datasets.
+- Embeddings are stored as JSON vectors, not a vector index.
+- Only one embedding row is stored per chunk, so changing models updates that row.
+- There is no answer-generation UI or source-grounded prompt flow yet.
+- OCR for scanned PDFs is not implemented.
 
 ## Development Log Process
 
@@ -203,3 +276,35 @@ Commit:
 
 Next recommended step:
 - Add embedding-based semantic search and hybrid ranking that combines vector similarity with the existing SQLite BM25 retrieval, then use retrieved chunks for citation-grounded answer generation.
+
+### 2026-07-10 Semantic and hybrid retrieval
+
+Changed:
+- Added `OPENAI_API_KEY` and `OPENAI_EMBEDDING_MODEL` configuration with `.env.example`; the default embedding model is `text-embedding-3-small`.
+- Added `DocumentChunkEmbedding` with JSON vector storage, dimensions, embedding model, content hash, and timestamps.
+- Added an OpenAI embedding service with batching, normalized vectors, response validation, typed errors, and dependency injection for tests.
+- Added idempotent upload-time embedding sync, stale/missing/all backfill helpers, and package scripts for embedding backfill and rebuild.
+- Added semantic cosine retrieval over stored vectors, hybrid RRF retrieval, deduplication by chunk ID, deterministic tie ordering, and citation-safe metadata preservation.
+- Extended `GET /api/search` with `mode=keyword|semantic|hybrid`, semantic availability metadata, default keyword fallback, and explicit missing-key/missing-embedding errors.
+- Updated the workspace search UI with Hybrid/Semantic/Keyword modes, ranking metadata, and unavailable states.
+- Added vector, semantic retrieval, hybrid fusion, deterministic tie ordering, missing-key, fallback, content-hash, idempotency, and model-change tests.
+
+Current status:
+- Keyword search remains fully local and available without an OpenAI key.
+- Semantic and hybrid search require an API key and stored embeddings for the configured model.
+- Uploads remain recoverable when embedding generation fails; rerun `npm run embeddings:backfill` after fixing configuration.
+- AI answer generation is still not implemented.
+
+Verification results:
+- `npm run test:unit` passes with 18 tests.
+- `npm run typecheck` passes.
+- `npm run lint` passes and prints `eslint config ok`.
+- `npm run smoke:retrieval` initially failed in the sandbox because `tsx` could not create an IPC pipe under the macOS temp directory; rerunning outside the sandbox passed and showed semantic ranks `chunk_a`, `chunk_c`, `chunk_b` plus hybrid ranks `chunk_a`, `chunk_b`, `chunk_c`.
+- `npm run embeddings:backfill` initially hit the same sandbox `tsx` IPC restriction; rerunning outside the sandbox reached the expected missing-key error: `OPENAI_API_KEY is required for embedding generation and semantic search. Add it to your local environment or use keyword search.`
+- `npx prisma generate` and `./node_modules/.bin/prisma generate` each stayed silent for about 1 minute and were interrupted; running the local binary outside the sandbox showed the same behavior.
+- `./node_modules/.bin/prisma migrate status` stayed silent for about 1 minute and was interrupted; running it outside the sandbox showed the same behavior.
+- The embedding migration SQL was applied directly to `prisma/quicknotes.dev.db` with `/usr/bin/sqlite3`, and `.schema DocumentChunkEmbedding` shows the expected table and indexes.
+- `npm run build` printed only the npm script header and `next build --webpack`, then stayed silent for about 1 minute and was interrupted.
+
+Next recommended milestone:
+- Citation-backed answer generation with retrieved-context validation, source-grounded prompts, inline page citations, and a strict not-found-in-sources fallback.
