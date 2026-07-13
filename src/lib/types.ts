@@ -7,6 +7,7 @@ export type StudyDocument = {
   className: string;
   topic: string;
   source: string;
+  documentDate: string;
   tags: string[];
   pageCount: number;
   uploadedAt: string;
@@ -22,6 +23,8 @@ export type StudyDocumentSummary = {
   title: string;
   className: string | null;
   topic: string | null;
+  source: string | null;
+  documentDate: string | null;
   tags: string[];
   uploadStatus: StudyDocumentUploadStatus;
   pageCount: number | null;
@@ -87,6 +90,8 @@ export type ChunkSearchResult = {
   originalFileName: string;
   className: string | null;
   topic: string | null;
+  source: string | null;
+  documentDate: string | null;
   tags: string[];
   pageNumber: number;
   chunkIndex: number;
@@ -122,16 +127,44 @@ export type SearchResponse = {
     formula: string;
     rrfK?: number;
   };
-  filters: {
-    documentId?: string;
-    className?: string;
-    topic?: string;
-    tag?: string;
-  };
+  filters: AppliedRetrievalFilters;
   results: ChunkSearchResult[];
 };
 
 export type RetrievalMode = "semantic" | "keyword" | "hybrid";
+
+export type RetrievalFilters = {
+  documentIds?: string[];
+  classNames?: string[];
+  topics?: string[];
+  sources?: string[];
+  tags?: string[];
+  documentDateFrom?: string;
+  documentDateTo?: string;
+};
+
+export type AppliedRetrievalFilters = {
+  documentIds: string[];
+  classNames: string[];
+  topics: string[];
+  sources: string[];
+  tags: string[];
+  documentDateFrom?: string;
+  documentDateTo?: string;
+  tagMatch: "any";
+};
+
+export type MetadataOption = {
+  value: string;
+  count: number;
+};
+
+export type MetadataOptionsResponse = {
+  classes: MetadataOption[];
+  topics: MetadataOption[];
+  sources: MetadataOption[];
+  tags: MetadataOption[];
+};
 
 export type AnswerStatus = "answered" | "insufficient_evidence";
 
@@ -162,6 +195,7 @@ export type AnswerResponse = {
   citations: AnswerCitation[];
   retrievedChunks: AnswerRetrievedChunk[];
   retrievalMode: RetrievalMode;
+  filters: AppliedRetrievalFilters;
   model: string;
 };
 

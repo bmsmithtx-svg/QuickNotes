@@ -1,9 +1,12 @@
+import { loadScriptEnv } from "./script-env";
 import { getAnswerRuntimeConfig } from "../src/lib/server/answer-config";
 import {
   OpenAIResponsesAnswerClient,
   generateCitationBackedAnswer
 } from "../src/lib/server/answer-service";
 import type { PrismaTransactionLike } from "../src/lib/server/db";
+
+loadScriptEnv();
 
 type FakeRow = ReturnType<typeof row>;
 
@@ -206,6 +209,8 @@ function row(
     originalFileName,
     className: "Biology",
     topic: "cell energy",
+    source: "Smoke fixture",
+    documentDate: null,
     tags: '["smoke"]',
     pageNumber,
     chunkIndex,

@@ -4,9 +4,17 @@ import { getEmbeddingRuntimeConfig } from "@/lib/server/embedding-config";
 import { EmbeddingServiceError, createOpenAIEmbeddingService } from "@/lib/server/embedding-service";
 import { hasStoredEmbeddings } from "@/lib/server/embedding-sync";
 import { getPrisma } from "@/lib/server/db";
+import { normalizeRetrievalFilters } from "@/lib/server/metadata";
 import { searchChunks, type SearchChunksInput } from "@/lib/server/search-index";
 import { getRankingFormula, resolveSearchMode, retrieveChunks } from "@/lib/server/retrieval";
-import type { ChunkSearchResult, RetrievalMode, SearchModeAvailability, SearchResponse } from "@/lib/types";
+import type {
+  AppliedRetrievalFilters,
+  ChunkSearchResult,
+  RetrievalFilters,
+  RetrievalMode,
+  SearchModeAvailability,
+  SearchResponse
+} from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,12 +27,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Search query parameter q is required." }, { status: 400 });
   }
 
+  let filters: AppliedRetrievalFilters;
+
+  try {
+    filters = normalizeRetrievalFilters(parseSearchFilters(url));
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Invalid filters."
+      },
+      { status: 400 }
+    );
+  }
+
   const input: SearchChunksInput = {
     query,
-    documentId: getTextParameter(url, "documentId") ?? undefined,
-    className: getTextParameter(url, "class") ?? undefined,
-    topic: getTextParameter(url, "topic") ?? undefined,
-    tag: getTextParameter(url, "tag") ?? undefined,
+    filters,
     limit: getIntegerParameter(url, "limit")
   };
   const requestedMode = getSearchModeParameter(url);
@@ -104,12 +122,7 @@ export async function GET(request: Request) {
       formula: getRankingFormula(actualMode),
       rrfK: actualMode === "hybrid" ? 60 : undefined
     },
-    filters: {
-      documentId: input.documentId,
-      className: input.className,
-      topic: input.topic,
-      tag: input.tag
-    },
+    filters,
     results
   };
 
@@ -175,4 +188,35 @@ function getSearchModeParameter(url: URL): RetrievalMode | null | "invalid" {
   }
 
   return "invalid";
+}
+
+function parseSearchFilters(url: URL): RetrievalFilters {
+  return {
+    documentIds: collectTextParameters(url, ["documentId", "documentIds"]),
+    classNames: collectTextParameters(url, ["className", "classNames", "class"]),
+    topics: collectTextParameters(url, ["topic", "topics"]),
+    sources: collectTextParameters(url, ["source", "sources"]),
+    tags: collectTextParameters(url, ["tag", "tags"]),
+    documentDateFrom: getTextParameter(url, "documentDateFrom") ?? getTextParameter(url, "dateFrom") ?? undefined,
+    documentDateTo: getTextParameter(url, "documentDateTo") ?? getTextParameter(url, "dateTo") ?? undefined
+  };
+}
+
+function collectTextParameters(url: URL, names: string[]) {
+  const values: string[] = [];
+
+  for (const name of names) {
+    for (const value of url.searchParams.getAll(name)) {
+      values.push(...splitMultiValue(value));
+    }
+  }
+
+  return values;
+}
+
+function splitMultiValue(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }

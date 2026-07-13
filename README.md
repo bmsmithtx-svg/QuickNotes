@@ -2,68 +2,116 @@
 
 QuickNotes is a local-first study app for learning from uploaded course material. Students can upload PDF textbooks, class notes, and study documents, search extracted chunks, and ask questions that are answered only from retrieved source evidence.
 
-The current milestone adds citation-backed answer generation on top of the existing hybrid retrieval pipeline. QuickNotes still uses Next.js, Prisma, and SQLite; it does not use hosted vector databases or external app backends.
+The current milestone adds document metadata management and end-to-end filtered RAG. QuickNotes still uses Next.js, Prisma, SQLite, SQLite FTS5, local JSON-stored embeddings, and OpenAI for embedding and answer generation when a server-side API key is configured.
 
 ## Architecture
 
 - Next.js App Router serves the workspace UI and API routes.
-- Prisma with local SQLite stores document metadata, page text, chunks, and chunk embeddings.
-- `pdfjs-dist` extracts text from uploaded PDF text layers.
-- SQLite FTS5 powers keyword retrieval through a rebuildable `DocumentChunkSearch` mirror.
+- Prisma with local SQLite stores documents, metadata, extracted pages, chunks, FTS data, embeddings, and normalized tags.
+- `pdfjs-dist` extracts PDF text layers.
+- SQLite FTS5 powers keyword retrieval through `DocumentChunkSearch`.
 - `DocumentChunkEmbedding` stores normalized OpenAI embedding vectors as JSON for local semantic scans.
 - Hybrid retrieval combines keyword and semantic candidates with Reciprocal Rank Fusion.
-- Answer generation reuses `retrieveChunks`; there is no separate answer-specific retrieval path.
+- Answer generation reuses the same retrieval helpers and never runs a separate unfiltered retrieval path.
 - OpenAI calls are isolated in server-side services under `src/lib/server/`.
 
-## Environment Variables
+## Metadata
 
-```bash
-OPENAI_API_KEY=
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-OPENAI_CHAT_MODEL=gpt-4o-mini
+Each document can store:
+
+- `className`: optional string
+- `topic`: optional string
+- `source`: optional string
+- `documentDate`: optional `YYYY-MM-DD` date
+- `tags`: zero or more normalized tags
+
+Metadata normalization trims whitespace and stores empty strings as `null`. Tags are stored in normalized `Tag` and `DocumentTag` tables with a case-insensitive `normalizedName`, while the existing `StudyDocument.tags` JSON column is retained only as a compatibility cache. Duplicate tags on the same document are prevented by the `DocumentTag` primary key.
+
+## Filter Semantics
+
+Shared retrieval filters are used by keyword, semantic, hybrid, and answer retrieval:
+
+```ts
+type RetrievalFilters = {
+  documentIds?: string[];
+  classNames?: string[];
+  topics?: string[];
+  sources?: string[];
+  tags?: string[];
+  documentDateFrom?: string;
+  documentDateTo?: string;
+};
 ```
 
-- `OPENAI_API_KEY` enables upload-time embeddings, semantic/hybrid retrieval, and answer generation.
-- `OPENAI_EMBEDDING_MODEL` defaults to `text-embedding-3-small`.
-- `OPENAI_CHAT_MODEL` defaults to `gpt-4o-mini`.
-- API keys are read only on the server and are never exposed to browser code.
+- Multiple values within one category use OR semantics.
+- Different categories use AND semantics.
+- Multiple selected tags use match-any semantics.
+- Tags match by normalized case-insensitive name.
+- `documentDateFrom` and `documentDateTo` are inclusive `YYYY-MM-DD` boundaries.
+- Empty values are discarded during normalization.
+- Invalid dates or reversed date ranges are rejected.
+- If filters match no documents or no chunks, retrieval returns no chunks; it does not fall back to unfiltered retrieval.
 
-Without an API key, uploads, document browsing, and keyword search remain usable. Answer generation needs an API key when retrieved evidence exists.
+## Metadata APIs
 
-## Local Setup
+Update document metadata:
 
-```bash
-npm install
-npx prisma generate
-npx prisma migrate dev
-npm run dev
+```text
+PATCH /api/documents/:id
+Content-Type: application/json
 ```
 
-Local runtime data is ignored by git:
+```json
+{
+  "className": "Data Analytics",
+  "topic": "Regression",
+  "source": "Course Textbook",
+  "documentDate": "2026-07-12",
+  "tags": ["statistics", "exam-2"]
+}
+```
 
-- Uploaded PDFs: `storage/uploads/`
-- Extracted/generated local data: `storage/extracted/`
-- SQLite database: `prisma/quicknotes.dev.db`
-- `.env`, SQLite journals, uploads, cache files, and build output
+The endpoint validates input, returns `400` for invalid payloads, `404` for missing documents, and updates tags transactionally without touching pages, chunks, embeddings, or FTS records.
+
+Metadata options:
+
+```text
+GET /api/documents/metadata-options
+```
+
+Returns deterministic distinct values and document counts for classes, topics, sources, and tags:
+
+```json
+{
+  "classes": [{ "value": "Data Analytics", "count": 2 }],
+  "topics": [{ "value": "Regression", "count": 3 }],
+  "sources": [{ "value": "Course Textbook", "count": 1 }],
+  "tags": [{ "value": "exam-2", "count": 1 }]
+}
+```
 
 ## Search API
 
 ```text
-GET /api/search?q=mitochondria&mode=hybrid&limit=8
+GET /api/search?q=regression&mode=hybrid&className=Data%20Analytics&tag=exam-2
 ```
 
-Optional filters:
+Supported filters can be sent as repeated query parameters or comma-separated values:
 
 ```text
-documentId=<document id>
-class=<class name>
+documentId=<id>
+className=<class>
+class=<class>          # backward-compatible alias
 topic=<topic>
+source=<source>
 tag=<tag>
+documentDateFrom=2026-07-01
+documentDateTo=2026-07-31
 limit=<1-50>
 mode=<keyword|semantic|hybrid>
 ```
 
-Search returns ranked chunks with file, page, chunk, score, rank, detailed ranking metadata, and exact source chunk text in `citation.sourceChunk`.
+The response includes `filters`, `requestedMode`, `actualMode`, ranking formula metadata, and ranked chunks with citation-safe source text.
 
 ## Answer API
 
@@ -72,197 +120,140 @@ POST /api/answer
 Content-Type: application/json
 ```
 
-Request:
-
 ```json
 {
-  "question": "string",
-  "documentIds": ["optional-document-id"],
-  "mode": "keyword",
-  "topK": 8
+  "question": "What assumptions are required for linear regression?",
+  "mode": "hybrid",
+  "topK": 8,
+  "filters": {
+    "classNames": ["Data Analytics"],
+    "topics": ["Regression"],
+    "tags": ["exam-2"]
+  }
 }
 ```
 
-Response:
+The legacy top-level `documentIds` field is still accepted and merged into `filters.documentIds` internally. The response includes `filters` so clients can show the applied scope. Only chunks that pass server-side filters can be passed to the model, cited, or returned as retrieved chunks.
 
-```json
-{
-  "status": "answered",
-  "answer": "Mitochondria make ATP [1].",
-  "citations": [
-    {
-      "id": 1,
-      "marker": "[1]",
-      "documentId": "doc_id",
-      "documentTitle": "Cell Energy Notes",
-      "documentFileName": "cell-energy.pdf",
-      "pageNumber": 2,
-      "chunkId": "chunk_id",
-      "chunkIndex": 1,
-      "sourceText": "Exact retrieved source chunk text.",
-      "retrievalRank": 1,
-      "retrievalScore": 0.0325,
-      "retrievalMetadata": {
-        "mode": "hybrid",
-        "finalRank": 1,
-        "finalScore": 0.0325,
-        "keywordRank": 2,
-        "keywordScore": 8,
-        "semanticRank": 1,
-        "semanticSimilarity": 0.91
-      }
-    }
-  ],
-  "retrievedChunks": [],
-  "retrievalMode": "hybrid",
-  "model": "gpt-4o-mini"
-}
-```
-
-`documentIds` is optional. When present, keyword, semantic, and hybrid retrieval all apply the same document filter inside the shared retrieval helpers.
-
-## Citation Format
-
-Generated answers cite sources with stable markers such as `[1]`, `[2]`, and `[3]`.
-
-Each returned citation includes:
-
-- Citation ID and marker
-- Document ID
-- Document title and original filename
-- Page number
-- Chunk ID and chunk index
-- Exact retrieved source text
-- Retrieval rank
-- Retrieval score and ranking metadata
-
-The answer service validates every marker in the generated answer. If the model cites a marker that is not in the returned citation set, or answers without citations, QuickNotes returns insufficient evidence instead of the model answer.
-
-Duplicate retrieved chunks are collapsed by `chunkId`, and duplicate answer markers return one citation entry.
-
-## Grounding Policy
-
-Answers must be grounded exclusively in retrieved chunks.
-
-- The model prompt says to use only supplied `SOURCE_CHUNKS`.
-- The prompt forbids outside knowledge, memory, assumptions, and unstated facts.
-- Every factual claim in an answered response must include citation markers.
-- The server validates citation markers after generation.
-- If retrieval returns no source chunks with exact text, the LLM is not called.
-
-Insufficient evidence response:
+If filtered retrieval finds no usable chunks, QuickNotes returns:
 
 ```text
 I couldn't find enough information in the selected sources to answer that question.
 ```
 
-QuickNotes returns this exact text when retrieval finds no usable chunks, when the model reports insufficient evidence, when citation markers are invalid, or when an answered response has no citations.
+## Workspace UI
 
-## Prompt Injection Defenses
+The workspace includes:
 
-Uploaded PDFs are treated as untrusted data, not instructions.
+- PDF upload with title, class, topic, source, date, and tag fields
+- Document list and extracted page/chunk preview
+- Editable metadata panel for class, topic, source, document date, and tags
+- Save/loading/error/success state for metadata edits
+- Duplicate-aware tag entry with normalized tag preview
+- Shared filter panel for documents, classes, topics, sources, tags, and date range
+- Clear-all filter action and active-scope chips
+- Search and Ask QuickNotes using the same filters
+- Filter-aware empty states for overly restrictive scopes
+- Citation-backed answer display with clickable source reveals
 
-- Source chunks are serialized as structured JSON context.
-- System instructions explicitly tell the model to ignore commands, policies, secrets, role changes, and tool-use requests inside source chunks.
-- Prompt-injection text inside PDFs is never executed; it is only quoted as source evidence.
-- The browser never receives `OPENAI_API_KEY`.
-
-## Ask QuickNotes UI
-
-The workspace includes an "Ask QuickNotes" panel with:
-
-- Question input
-- Keyword, semantic, and hybrid mode selector
-- Optional document filter
-- Loading and API error states
-- Insufficient-evidence state
-- Answer display with clickable citation markers
-- Citation buttons that reveal document name, page number, rank, score, filename, and exact retrieved chunk
-
-## Manual Smoke Tests
+## Environment Variables
 
 ```bash
-npm run smoke:retrieval
-npm run smoke:answer
+OPENAI_API_KEY=
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_CHAT_MODEL=gpt-4o-mini
+OPENAI_EVAL_MODEL=
 ```
 
-`smoke:retrieval` verifies deterministic semantic and hybrid ranking with fake vectors.
+Without an API key, uploads, document browsing, and keyword search remain usable. Semantic/hybrid retrieval and answer generation need embeddings and a valid OpenAI key.
 
-`smoke:answer` requires `OPENAI_API_KEY`. With a key, it verifies:
-
-- Supported question
-- Unsupported question
-- Document filtering
-- Citation markers
-- Page numbers
-- Chunk metadata
-- Prompt-injection source text treated as source data
-
-Without a key, it prints a skip message and exits successfully.
-
-## Automated Checks
+## Local Setup
 
 ```bash
-npm run lint
+npm install
+npx prisma generate
+npx prisma migrate deploy
+npm run dev
+```
+
+For a fresh local development database, `npx prisma migrate dev` is also fine. Runtime data is ignored by git, including uploaded PDFs, SQLite databases, journals, `.env*` files except `.env.example`, and build output.
+
+## Migration Notes
+
+This milestone adds migration `20260712173000_add_document_metadata_filters`:
+
+- Adds `StudyDocument.source`
+- Adds `StudyDocument.documentDate`
+- Adds metadata indexes for class, topic, source, and document date
+- Adds `Tag`
+- Adds `DocumentTag`
+- Backfills existing JSON tags into normalized tag rows
+
+If a local SQLite database was manually changed before migrations were recorded, repair only the local migration history after confirming the schema objects already exist. Do not reset a database with user data.
+
+## Citation And Grounding
+
+Generated answers cite sources with stable markers such as `[1]`. The model returns structured claims with citation IDs; the server validates IDs and appends visible markers itself.
+
+Prompt-injection defenses remain in place:
+
+- Source chunks are serialized as untrusted JSON data.
+- System instructions require using only supplied `SOURCE_CHUNKS`.
+- Commands or role changes inside PDFs are ignored.
+- Excluded documents never reach answer context.
+- The browser never receives `OPENAI_API_KEY`.
+
+## Tests And Evaluation
+
+```bash
+npx prisma generate
+npx prisma migrate status
 npm run typecheck
+npm run lint
 npm run test:unit
+npm run eval:offline
 npm run smoke:retrieval
 npm run smoke:answer
+npm run eval:live
 npm run build
 ```
 
-Current verification from July 13, 2026:
+Offline fixtures now include:
 
-- `npm run lint` passed and printed `eslint config ok`.
-- `npm run typecheck` passed.
-- `npm run test:unit` passed with 31 tests.
-- `npm run smoke:retrieval` initially hit a sandbox `tsx` IPC permission error, then passed outside the sandbox.
-- `npm run smoke:answer` initially hit the same sandbox `tsx` IPC permission error, then skipped outside the sandbox because `OPENAI_API_KEY` is not configured in this shell.
-- `npx prisma --version` completed with Prisma 6.19.3, `@prisma/client` 6.19.3, Node.js v25.9.0, darwin-arm64 engines.
-- `npx prisma validate` passed.
-- `npm run build` still hangs after printing only the npm script line and `next build --webpack`; it was interrupted after about one minute both sandboxed and unsandboxed.
+- Similar regression terminology in different classes
+- Shared regression topic with different tags
+- A class-filter-dependent answer case
+- A tag-filter-dependent answer case
+- A no-match filtered case
 
-## Privacy Considerations
+`eval:offline` reports retrieval metrics and citation correctness separately. `smoke:answer` and `eval:live` require a valid OpenAI key with billing/model access.
 
-- OpenAI keys are server-only environment variables.
-- Full document text is sent to OpenAI only for retrieved answer context or embedding generation.
-- Full private document content is not logged by retrieval, embedding, or answer helpers.
-- Uploaded PDFs, local SQLite databases, extracted data, and generated artifacts are ignored by git.
-- There is no authentication or deployment in this milestone.
+## Current Verification
+
+Verified on July 13, 2026:
+
+- `npx prisma generate`: passed
+- `npx prisma migrate status`: database schema up to date
+- `npm run typecheck`: passed
+- `npm run lint`: passed
+- `npm run test:unit`: passed, 51 tests
+- `npm run eval:offline`: passed, all tracked rates 1.000
+- `npm run smoke:retrieval`: passed
+- `npm run smoke:answer`: OpenAI rejected the configured request; non-secret error: `OpenAI rejected the answer request. Check OPENAI_API_KEY permissions and billing access.`
+- `npm run eval:live`: same OpenAI rejection
+- `npm run build`: passed with `next build --webpack`
+
+In the Codex sandbox, `tsx` commands may fail to create their local IPC pipe with `listen EPERM`; rerunning those commands outside the sandbox resolves that local runner issue.
 
 ## Limitations
 
-- Semantic retrieval scans JSON vectors in-process, so it is intended for local or small datasets.
+- Semantic retrieval scans JSON vectors in-process and is intended for local or small datasets.
 - Embeddings are stored as JSON, not in a vector index.
 - Only one embedding row is stored per chunk.
-- Answer faithfulness still relies on prompt instructions plus marker validation; it does not yet split every sentence into independently verified claims.
 - OCR for scanned PDFs is not implemented.
-- The Next.js production build hang remains unresolved in this local runtime.
+- No authentication, cloud file storage, managed database, hosted vector store, or deployment configuration is implemented in this milestone.
+- Live answer/eval verification depends on a working OpenAI key with billing/model access.
 
-## Development Log
+## Recommended Next Milestone
 
-### 2026-07-13 Citation-backed answer generation
-
-Changed:
-
-- Added server-side answer generation using `OPENAI_API_KEY` and `OPENAI_CHAT_MODEL`.
-- Added `POST /api/answer`.
-- Reused the existing keyword, semantic, and hybrid retrieval helpers for answer context.
-- Added multi-document filtering inside the shared retrieval input.
-- Added numbered citation construction, exact source chunk preservation, marker validation, duplicate citation handling, and insufficient-evidence fallback.
-- Added prompt-injection defenses for untrusted uploaded PDF text.
-- Added the Ask QuickNotes UI with document filtering, loading/error states, insufficient-evidence state, answer display, and clickable citations.
-- Added unit tests for validation, context creation, prompt injection resistance, insufficient evidence, citation validation, hallucinated citation IDs, duplicate citations, document filtering, deterministic ordering, and OpenAI failures.
-- Added `scripts/answer-smoke.ts` and `npm run smoke:answer`.
-
-Current status:
-
-- Citation-backed answer generation is implemented server-side.
-- Unit tests do not require a real API key and mock all OpenAI behavior.
-- Real answer smoke testing requires setting `OPENAI_API_KEY`.
-- Prisma CLI version and validation commands now complete in this run.
-- `npm run build` still hangs before Next.js emits build details.
-
-Next milestone:
-
-- Fix the Next.js build hang, then add answer faithfulness evaluation fixtures and browser-level UI tests for Ask QuickNotes.
+Production persistence and deployment readiness, including managed PostgreSQL/vector storage, cloud file storage, authentication, and deployment configuration.

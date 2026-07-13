@@ -20,6 +20,8 @@ type FakeRow = {
   originalFileName: string;
   className: string | null;
   topic: string | null;
+  source: string | null;
+  documentDate: string | null;
   tags: string;
   pageNumber: number;
   chunkIndex: number;
@@ -28,17 +30,21 @@ type FakeRow = {
 
 function createDb({
   keywordRows = [],
-  semanticRows = []
+  semanticRows = [],
+  seenQueries = []
 }: {
   keywordRows?: Array<FakeRow & { score: number }>;
   semanticRows?: Array<FakeRow & { dimensions: number; vectorJson: string }>;
+  seenQueries?: Array<{ query: string; values: unknown[] }>;
 }): PrismaTransactionLike {
   return {
     studyDocument: delegate,
     documentPage: delegate,
     documentChunk: delegate,
     $executeRawUnsafe: async () => 0,
-    $queryRawUnsafe: async <Result = unknown>(query: string) => {
+    $queryRawUnsafe: async <Result = unknown>(query: string, ...values: unknown[]) => {
+      seenQueries.push({ query, values });
+
       if (query.includes("DocumentChunkEmbedding")) {
         return semanticRows as Result;
       }
@@ -80,6 +86,38 @@ describe("semantic retrieval", () => {
       sourceChunk: "Mitochondria make ATP."
     });
   });
+
+  it("applies shared metadata filters before semantic ranking", async () => {
+    const seenQueries: Array<{ query: string; values: unknown[] }> = [];
+    const db = createDb({
+      seenQueries,
+      semanticRows: [semanticRow("chunk_a", "doc_1", 1, 1, [1, 0], "Mitochondria make ATP.")]
+    });
+
+    await searchSemanticChunks(
+      db,
+      {
+        query: "ATP",
+        filters: {
+          classNames: ["Biology"],
+          topics: ["cells"],
+          tags: ["Exam"],
+          documentDateFrom: "2026-07-01",
+          documentDateTo: "2026-07-31"
+        },
+        limit: 3
+      },
+      embeddingService
+    );
+
+    const semanticQuery = seenQueries.find((query) => query.query.includes("DocumentChunkEmbedding"));
+
+    assert.ok(semanticQuery);
+    assert.match(semanticQuery.query, /"document"\."className" = \?/);
+    assert.match(semanticQuery.query, /"filterTag"\."normalizedName" IN \(\?\)/);
+    assert.deepEqual(semanticQuery.values.slice(0, 4), ["test-embedding", "Biology", "cells", new Date("2026-07-01T00:00:00.000Z")]);
+    assert.equal(semanticQuery.values.at(-1), "exam");
+  });
 });
 
 describe("hybrid retrieval", () => {
@@ -119,6 +157,42 @@ describe("hybrid retrieval", () => {
 
     assert.deepEqual(results.map((result) => result.chunkId), ["chunk_keyword", "chunk_semantic"]);
     assert.equal(results[0].ranking.finalScore, results[1].ranking.finalScore);
+  });
+
+  it("passes the same filters into keyword and semantic retrieval for hybrid search", async () => {
+    const seenQueries: Array<{ query: string; values: unknown[] }> = [];
+    const db = createDb({
+      seenQueries,
+      keywordRows: [keywordRow("chunk_a", 1, 1, 8)],
+      semanticRows: [semanticRow("chunk_a", "doc_1", 1, 1, [1, 0], "Mitochondria make ATP.")]
+    });
+
+    await searchHybridChunks(
+      db,
+      {
+        query: "ATP",
+        filters: {
+          documentIds: ["doc_1"],
+          sources: ["Course notes"],
+          tags: ["exam"]
+        },
+        limit: 2
+      },
+      embeddingService
+    );
+
+    const retrievalQueries = seenQueries.filter((query) => query.query.includes("StudyDocument"));
+
+    assert.equal(retrievalQueries.length, 2);
+
+    for (const query of retrievalQueries) {
+      assert.match(query.query, /"document"\."id" = \?/);
+      assert.match(query.query, /"document"\."source" = \?/);
+      assert.match(query.query, /"filterTag"\."normalizedName" IN \(\?\)/);
+      assert.ok(query.values.includes("doc_1"));
+      assert.ok(query.values.includes("Course notes"));
+      assert.ok(query.values.includes("exam"));
+    }
   });
 });
 
@@ -164,6 +238,8 @@ function baseRow(chunkId: string, pageNumber: number, chunkIndex: number, text: 
     originalFileName: "notes.pdf",
     className: "Biology",
     topic: "cells",
+    source: "Course notes",
+    documentDate: null,
     tags: '["exam"]',
     pageNumber,
     chunkIndex,

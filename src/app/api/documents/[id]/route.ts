@@ -1,7 +1,18 @@
 import { NextResponse } from "next/server";
 
-import { mapStudyDocumentDetail, type DocumentWithCounts } from "@/lib/server/document-mappers";
+import {
+  getDocumentInclude,
+  mapStudyDocumentDetail,
+  type DocumentWithCounts
+} from "@/lib/server/document-mappers";
 import { getPrisma } from "@/lib/server/db";
+import {
+  parseDocumentMetadataUpdatePayload,
+  replaceDocumentTags,
+  serializeNormalizedTags,
+  type DocumentMetadataUpdate,
+  type MetadataTagTransaction
+} from "@/lib/server/metadata";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,14 +30,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
     where: {
       id
     },
-    include: {
-      _count: {
-        select: {
-          pages: true,
-          chunks: true
-        }
-      }
-    }
+    include: getDocumentInclude()
   })) as DocumentWithCounts | null;
 
   if (!document) {
@@ -36,4 +40,78 @@ export async function GET(_request: Request, { params }: RouteContext) {
   return NextResponse.json({
     document: mapStudyDocumentDetail(document)
   });
+}
+
+export async function PATCH(request: Request, { params }: RouteContext) {
+  let payload: unknown;
+
+  try {
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
+  }
+
+  const parsed = parseDocumentMetadataUpdatePayload(payload);
+
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+
+  const { id } = await params;
+  const prisma = await getPrisma();
+
+  try {
+    const document = await prisma.$transaction(async (transaction) => {
+      const existing = await transaction.studyDocument.findUnique({
+        where: {
+          id
+        },
+        select: {
+          id: true
+        }
+      });
+
+      if (!existing) {
+        return null;
+      }
+
+      await transaction.studyDocument.update({
+        where: {
+          id
+        },
+        data: toDocumentUpdateData(parsed.value)
+      });
+
+      if (parsed.value.tags) {
+        await replaceDocumentTags(transaction as unknown as MetadataTagTransaction, id, parsed.value.tags);
+      }
+
+      return (await transaction.studyDocument.findUnique({
+        where: {
+          id
+        },
+        include: getDocumentInclude()
+      })) as DocumentWithCounts | null;
+    });
+
+    if (!document) {
+      return NextResponse.json({ error: "Document not found." }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      document: mapStudyDocumentDetail(document)
+    });
+  } catch {
+    return NextResponse.json({ error: "Document metadata update failed." }, { status: 500 });
+  }
+}
+
+function toDocumentUpdateData(update: DocumentMetadataUpdate) {
+  return {
+    ...(Object.hasOwn(update, "className") ? { className: update.className } : {}),
+    ...(Object.hasOwn(update, "topic") ? { topic: update.topic } : {}),
+    ...(Object.hasOwn(update, "source") ? { source: update.source } : {}),
+    ...(Object.hasOwn(update, "documentDate") ? { documentDate: update.documentDate } : {}),
+    ...(update.tags ? { tags: serializeNormalizedTags(update.tags) } : {})
+  };
 }

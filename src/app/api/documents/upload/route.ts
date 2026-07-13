@@ -9,8 +9,14 @@ import { chunkPageText } from "@/lib/chunking";
 import { getEmbeddingRuntimeConfig } from "@/lib/server/embedding-config";
 import { createOpenAIEmbeddingService } from "@/lib/server/embedding-service";
 import { syncChunkEmbeddings, type EmbeddingSyncResult } from "@/lib/server/embedding-sync";
-import { serializeTags } from "@/lib/server/document-mappers";
 import { getPrisma } from "@/lib/server/db";
+import {
+  normalizeTagsInput,
+  parseDateOnly,
+  replaceDocumentTags,
+  serializeNormalizedTags,
+  type MetadataTagTransaction
+} from "@/lib/server/metadata";
 import { extractPdfTextByPage } from "@/lib/server/pdf-extraction";
 import { ensureChunkSearchIndex, syncDocumentSearchIndex, type SearchIndexChunk } from "@/lib/server/search-index";
 import { ensureLocalStorage, getStoredPdfPath } from "@/lib/server/storage";
@@ -52,6 +58,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "The uploaded file is not a valid PDF." }, { status: 415 });
     }
 
+    const metadata = parseUploadMetadata(formData);
+
+    if (!metadata.ok) {
+      return NextResponse.json({ error: metadata.error }, { status: 400 });
+    }
+
     await ensureLocalStorage();
 
     const storedFileName = `${randomUUID()}.pdf`;
@@ -64,9 +76,11 @@ export async function POST(request: Request) {
         fileSize: file.size,
         mimeType: file.type || "application/pdf",
         title: getTextField(formData, "title") || titleFromFileName(originalFileName),
-        className: getTextField(formData, "className"),
-        topic: getTextField(formData, "topic"),
-        tags: serializeTags(getTextField(formData, "tags") ?? ""),
+        className: metadata.value.className,
+        topic: metadata.value.topic,
+        source: metadata.value.source,
+        documentDate: metadata.value.documentDate,
+        tags: serializeNormalizedTags(metadata.value.tags),
         uploadStatus: "uploaded"
       }
     })) as { id: string };
@@ -100,6 +114,8 @@ export async function POST(request: Request) {
     await ensureChunkSearchIndex(prisma);
 
     await prisma.$transaction(async (transaction) => {
+      await replaceDocumentTags(transaction as MetadataTagTransaction, document.id, metadata.value.tags);
+
       if (pageRows.length > 0) {
         await transaction.documentPage.createMany({
           data: pageRows
@@ -263,6 +279,47 @@ function getTextField(formData: FormData, fieldName: string) {
 
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function parseUploadMetadata(formData: FormData):
+  | {
+      ok: true;
+      value: {
+        className: string | null;
+        topic: string | null;
+        source: string | null;
+        documentDate: Date | null;
+        tags: ReturnType<typeof normalizeTagsInput>;
+      };
+    }
+  | {
+      ok: false;
+      error: string;
+    } {
+  try {
+    return {
+      ok: true,
+      value: {
+        className: getTextField(formData, "className"),
+        topic: getTextField(formData, "topic"),
+        source: getTextField(formData, "source"),
+        documentDate: parseDateOnly(getTextField(formData, "documentDate"), "documentDate"),
+        tags: normalizeTagsInput(splitTagsField(getTextField(formData, "tags") ?? ""))
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Invalid metadata."
+    };
+  }
+}
+
+function splitTagsField(value: string) {
+  return value
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
 }
 
 function isPdfLike(file: File, originalFileName: string) {

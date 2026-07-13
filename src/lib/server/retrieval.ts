@@ -1,13 +1,12 @@
 import type { ChunkSearchResult, RetrievalMode } from "../types";
 import { parseTags } from "./document-mappers";
 import type { PrismaTransactionLike } from "./db";
+import { appendRetrievalFilterSql, getAppliedRetrievalFilters, tagJsonSelect } from "./retrieval-filters";
 import { parseStoredVector, cosineSimilarity } from "./vector-utils";
 import {
   buildTextPreview,
   clampSearchLimit,
-  escapeLikePattern,
   MAX_SEARCH_LIMIT,
-  appendDocumentIdFilter,
   searchChunks,
   type SearchChunksInput
 } from "./search-index";
@@ -27,6 +26,8 @@ type SemanticRow = {
   originalFileName: string;
   className: string | null;
   topic: string | null;
+  source: string | null;
+  documentDate: Date | string | null;
   tags: string;
   pageNumber: number;
   chunkIndex: number;
@@ -188,23 +189,9 @@ export function getRankingFormula(mode: RetrievalMode) {
 async function getStoredSemanticRows(db: PrismaTransactionLike, input: SearchChunksInput, model: string) {
   const filters: string[] = [`embedding."embeddingModel" = ?`];
   const parameters: unknown[] = [model];
+  const appliedFilters = getAppliedRetrievalFilters(input);
 
-  appendDocumentIdFilter(filters, parameters, input);
-
-  if (input.className) {
-    filters.push(`document."className" = ?`);
-    parameters.push(input.className);
-  }
-
-  if (input.topic) {
-    filters.push(`document."topic" = ?`);
-    parameters.push(input.topic);
-  }
-
-  if (input.tag) {
-    filters.push(`document."tags" LIKE ? ESCAPE '\\'`);
-    parameters.push(`%"${escapeLikePattern(input.tag)}"%`);
-  }
+  appendRetrievalFilterSql(filters, parameters, appliedFilters);
 
   return db.$queryRawUnsafe<SemanticRow[]>(
     `
@@ -215,7 +202,9 @@ async function getStoredSemanticRows(db: PrismaTransactionLike, input: SearchChu
         document."originalFileName" AS "originalFileName",
         document."className" AS "className",
         document."topic" AS "topic",
-        document."tags" AS "tags",
+        document."source" AS "source",
+        document."documentDate" AS "documentDate",
+        ${tagJsonSelect("document")} AS "tags",
         chunk."pageNumber" AS "pageNumber",
         chunk."chunkIndex" AS "chunkIndex",
         chunk."text" AS "text",
@@ -241,6 +230,8 @@ function mapSemanticRow(row: SemanticRow, similarity: number, rank: number): Chu
     originalFileName: row.originalFileName,
     className: row.className,
     topic: row.topic,
+    source: row.source,
+    documentDate: formatRowDate(row.documentDate),
     tags: parseTags(row.tags),
     pageNumber: Number(row.pageNumber),
     chunkIndex: Number(row.chunkIndex),
@@ -262,6 +253,20 @@ function mapSemanticRow(row: SemanticRow, similarity: number, rank: number): Chu
       sourceChunk: row.text
     }
   };
+}
+
+function formatRowDate(value: Date | string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = typeof value === "string" ? new Date(value) : value;
+
+  if (!Number.isFinite(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString().slice(0, 10);
 }
 
 function reciprocalRankScore(rank: number | undefined) {

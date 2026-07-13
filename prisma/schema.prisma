@@ -16,6 +16,8 @@ model StudyDocument {
   title            String
   className        String?
   topic            String?
+  source           String?
+  documentDate     DateTime?
   tags             String          @default("[]")
   uploadStatus     String          @default("uploaded")
   pageCount        Int?
@@ -24,9 +26,14 @@ model StudyDocument {
   updatedAt        DateTime        @updatedAt
   pages            DocumentPage[]
   chunks           DocumentChunk[]
+  tagLinks         DocumentTag[]
 
   @@index([createdAt])
   @@index([uploadStatus])
+  @@index([className])
+  @@index([topic])
+  @@index([source])
+  @@index([documentDate])
 }
 
 model DocumentPage {
@@ -70,4 +77,26 @@ model DocumentChunkEmbedding {
 
   @@index([embeddingModel])
   @@index([contentHash])
+}
+
+model Tag {
+  id             String        @id @default(cuid())
+  name           String
+  normalizedName String        @unique
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  documents      DocumentTag[]
+
+  @@index([name])
+}
+
+model DocumentTag {
+  documentId String
+  tagId      String
+  createdAt  DateTime      @default(now())
+  document   StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  tag        Tag           @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, tagId])
+  @@index([tagId])
 }

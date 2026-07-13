@@ -5,6 +5,7 @@ import {
   BookOpen,
   CheckCircle2,
   Database,
+  Filter,
   FileText,
   Loader2,
   MessageSquareText,
@@ -12,16 +13,29 @@ import {
   RefreshCw,
   Search,
   Tags,
-  Upload
+  Upload,
+  X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type ReactNode
+} from "react";
 
 import type {
+  AppliedRetrievalFilters,
   AnswerCitation,
   AnswerResponse,
   ChunkSearchResult,
   DocumentUploadResponse,
   DocumentContentResponse,
+  MetadataOptionsResponse,
+  RetrievalFilters,
   RetrievalMode,
   SearchResponse,
   SearchModeAvailability,
@@ -43,6 +57,47 @@ type SearchErrorPayload = {
 
 type AnswerErrorPayload = {
   error?: string;
+};
+
+type FilterState = {
+  documentIds: string[];
+  classNames: string[];
+  topics: string[];
+  sources: string[];
+  tags: string[];
+  documentDateFrom: string;
+  documentDateTo: string;
+};
+
+type MetadataFormState = {
+  className: string;
+  topic: string;
+  source: string;
+  documentDate: string;
+  tags: string;
+};
+
+type MetadataSaveState = "idle" | "saving" | "saved" | "error";
+
+type DocumentDetailResponse = {
+  document: StudyDocumentSummary;
+};
+
+const emptyFilters: FilterState = {
+  documentIds: [],
+  classNames: [],
+  topics: [],
+  sources: [],
+  tags: [],
+  documentDateFrom: "",
+  documentDateTo: ""
+};
+
+const emptyMetadataOptions: MetadataOptionsResponse = {
+  classes: [],
+  topics: [],
+  sources: [],
+  tags: []
 };
 
 const statusLabels: Record<StudyDocumentUploadStatus, string> = {
@@ -68,17 +123,21 @@ const searchModeOptions: Array<{ mode: RetrievalMode; label: string }> = [
 export function QuickNotesWorkspace() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<StudyDocumentSummary[]>([]);
+  const [metadataOptions, setMetadataOptions] = useState<MetadataOptionsResponse>(emptyMetadataOptions);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [content, setContent] = useState<DocumentContentResponse | null>(null);
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(true);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
+  const [metadataOptionsError, setMetadataOptionsError] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [filters, setFilters] = useState<FilterState>(emptyFilters);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMode, setSearchMode] = useState<RetrievalMode>("hybrid");
   const [searchResults, setSearchResults] = useState<ChunkSearchResult[]>([]);
   const [selectedSearchResult, setSelectedSearchResult] = useState<ChunkSearchResult | null>(null);
+  const [searchAppliedFilters, setSearchAppliedFilters] = useState<AppliedRetrievalFilters | null>(null);
   const [searchMetadata, setSearchMetadata] = useState<Pick<
     SearchResponse,
     "requestedMode" | "mode" | "actualMode" | "semantic" | "resultCount" | "ranking"
@@ -87,11 +146,19 @@ export function QuickNotesWorkspace() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [answerQuestion, setAnswerQuestion] = useState("");
   const [answerMode, setAnswerMode] = useState<RetrievalMode>("hybrid");
-  const [answerDocumentId, setAnswerDocumentId] = useState("all");
   const [answerResponse, setAnswerResponse] = useState<AnswerResponse | null>(null);
   const [selectedCitationId, setSelectedCitationId] = useState<number | null>(null);
   const [isAnswering, setIsAnswering] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
+  const [metadataForm, setMetadataForm] = useState<MetadataFormState>({
+    className: "",
+    topic: "",
+    source: "",
+    documentDate: "",
+    tags: ""
+  });
+  const [metadataSaveState, setMetadataSaveState] = useState<MetadataSaveState>("idle");
+  const [metadataSaveMessage, setMetadataSaveMessage] = useState<string | null>(null);
 
   const selectedDocument = useMemo(
     () => documents.find((document) => document.id === selectedDocumentId) ?? null,
@@ -101,6 +168,7 @@ export function QuickNotesWorkspace() {
     () => answerResponse?.citations.find((citation) => citation.id === selectedCitationId) ?? null,
     [answerResponse, selectedCitationId]
   );
+  const hasActiveFilters = useMemo(() => isFilterStateActive(filters), [filters]);
 
   const loadDocuments = useCallback(async (nextSelectedId?: string) => {
     setIsLoadingDocuments(true);
@@ -126,10 +194,28 @@ export function QuickNotesWorkspace() {
     }
   }, [selectedDocumentId]);
 
+  const loadMetadataOptions = useCallback(async () => {
+    setMetadataOptionsError(null);
+
+    try {
+      const response = await fetch("/api/documents/metadata-options", {
+        cache: "no-store"
+      });
+
+      if (!response.ok) {
+        throw new Error("Could not load metadata filters.");
+      }
+
+      setMetadataOptions((await response.json()) as MetadataOptionsResponse);
+    } catch (error) {
+      setMetadataOptionsError(error instanceof Error ? error.message : "Could not load metadata filters.");
+    }
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
 
-    loadDocuments()
+    Promise.all([loadDocuments(), loadMetadataOptions()])
       .catch((error: unknown) => {
         if (isMounted) {
           setUploadError(error instanceof Error ? error.message : "Could not load documents.");
@@ -140,7 +226,19 @@ export function QuickNotesWorkspace() {
     return () => {
       isMounted = false;
     };
-  }, [loadDocuments]);
+  }, [loadDocuments, loadMetadataOptions]);
+
+  useEffect(() => {
+    setMetadataSaveState("idle");
+    setMetadataSaveMessage(null);
+    setMetadataForm({
+      className: selectedDocument?.className ?? "",
+      topic: selectedDocument?.topic ?? "",
+      source: selectedDocument?.source ?? "",
+      documentDate: selectedDocument?.documentDate ?? "",
+      tags: selectedDocument?.tags.join(", ") ?? ""
+    });
+  }, [selectedDocument]);
 
   useEffect(() => {
     if (!selectedDocumentId) {
@@ -215,6 +313,7 @@ export function QuickNotesWorkspace() {
       form.reset();
       setUploadMessage(formatUploadMessage(payload));
       await loadDocuments(payload.documentId);
+      await loadMetadataOptions();
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "Upload failed.");
       setUploadMessage(null);
@@ -238,9 +337,11 @@ export function QuickNotesWorkspace() {
 
     setIsSearching(true);
     setSearchMetadata(null);
+    setSearchAppliedFilters(null);
 
     try {
       const parameters = new URLSearchParams({ q: query, mode: searchMode });
+      appendFiltersToSearchParams(parameters, filters);
       const response = await fetch(`/api/search?${parameters.toString()}`, {
         cache: "no-store"
       });
@@ -264,6 +365,7 @@ export function QuickNotesWorkspace() {
       }
 
       setSearchResults(payload.results);
+      setSearchAppliedFilters(payload.filters);
       setSearchMetadata({
         requestedMode: payload.requestedMode,
         mode: payload.mode,
@@ -281,6 +383,7 @@ export function QuickNotesWorkspace() {
       setSearchError(error instanceof Error ? error.message : "Search failed.");
       setSearchResults([]);
       setSelectedSearchResult(null);
+      setSearchAppliedFilters(null);
       setSearchMetadata((currentMetadata) => (currentMetadata?.resultCount === 0 ? currentMetadata : null));
     } finally {
       setIsSearching(false);
@@ -309,9 +412,9 @@ export function QuickNotesWorkspace() {
         },
         body: JSON.stringify({
           question,
-          documentIds: answerDocumentId === "all" ? undefined : [answerDocumentId],
           mode: answerMode,
-          topK: 8
+          topK: 8,
+          filters: filtersToPayload(filters)
         })
       });
       const payload = (await response.json()) as AnswerResponse | AnswerErrorPayload;
@@ -338,6 +441,66 @@ export function QuickNotesWorkspace() {
   function selectSearchResult(result: ChunkSearchResult) {
     setSelectedSearchResult(result);
     setSelectedDocumentId(result.documentId);
+  }
+
+  async function handleMetadataSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedDocument) {
+      return;
+    }
+
+    setMetadataSaveState("saving");
+    setMetadataSaveMessage(null);
+
+    try {
+      const response = await fetch(`/api/documents/${selectedDocument.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          className: metadataForm.className,
+          topic: metadataForm.topic,
+          source: metadataForm.source,
+          documentDate: metadataForm.documentDate || null,
+          tags: splitTags(metadataForm.tags)
+        })
+      });
+      const payload = (await response.json()) as DocumentDetailResponse | { error?: string };
+
+      if (!response.ok || !("document" in payload)) {
+        throw new Error("error" in payload ? payload.error ?? "Could not save metadata." : "Could not save metadata.");
+      }
+
+      setDocuments((currentDocuments) =>
+        currentDocuments.map((document) => (document.id === payload.document.id ? payload.document : document))
+      );
+      setContent((currentContent) =>
+        currentContent?.document.id === payload.document.id
+          ? {
+              ...currentContent,
+              document: {
+                ...currentContent.document,
+                ...payload.document
+              }
+            }
+          : currentContent
+      );
+      setMetadataForm({
+        className: payload.document.className ?? "",
+        topic: payload.document.topic ?? "",
+        source: payload.document.source ?? "",
+        documentDate: payload.document.documentDate ?? "",
+        tags: payload.document.tags.join(", ")
+      });
+      setMetadataSaveState("saved");
+      setMetadataSaveMessage("Metadata saved.");
+      await loadMetadataOptions();
+    } catch (error) {
+      setMetadataSaveState("error");
+      setMetadataSaveMessage(error instanceof Error ? error.message : "Could not save metadata.");
+    }
   }
 
   return (
@@ -415,6 +578,20 @@ export function QuickNotesWorkspace() {
                   />
                 </div>
                 <input
+                  name="source"
+                  type="text"
+                  placeholder="Source"
+                  className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                  disabled={isUploading}
+                />
+                <input
+                  name="documentDate"
+                  type="date"
+                  className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                  disabled={isUploading}
+                  aria-label="Document date"
+                />
+                <input
                   name="tags"
                   type="text"
                   placeholder="Tags"
@@ -443,6 +620,24 @@ export function QuickNotesWorkspace() {
                   </p>
                 ) : null}
               </form>
+            </section>
+
+            <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+              <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
+                <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Filters</h2>
+                <Filter aria-hidden="true" size={18} className="text-[var(--accent)]" />
+              </div>
+              <MetadataFilterControls
+                filters={filters}
+                documents={documents}
+                options={metadataOptions}
+                disabled={isSearching || isAnswering}
+                onChange={setFilters}
+                onClear={() => setFilters(emptyFilters)}
+              />
+              {metadataOptionsError ? (
+                <p className="border-t border-[var(--border)] p-4 text-sm text-[#9b1c1c]">{metadataOptionsError}</p>
+              ) : null}
             </section>
 
             <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
@@ -486,12 +681,19 @@ export function QuickNotesWorkspace() {
                 </div>
               </form>
               {searchMetadata ? <SearchModeNotice metadata={searchMetadata} selectedMode={searchMode} /> : null}
+              {searchAppliedFilters ? (
+                <div className="border-t border-[var(--border)] p-4">
+                  <ActiveScope filters={searchAppliedFilters} documents={documents} />
+                </div>
+              ) : null}
               {searchError ? (
                 <p className="border-t border-[var(--border)] p-4 text-sm text-[#9b1c1c]">{searchError}</p>
               ) : null}
               <div className="divide-y divide-[var(--border)]">
                 {!isSearching && searchQuery.trim() && searchResults.length === 0 && !searchError ? (
-                  <p className="p-4 text-sm text-[var(--muted)]">No matching chunks.</p>
+                  <p className="p-4 text-sm text-[var(--muted)]">
+                    {hasActiveFilters ? "No matching chunks. The selected filters may be too restrictive." : "No matching chunks."}
+                  </p>
                 ) : null}
                 {searchResults.map((result) => (
                   <button
@@ -575,7 +777,7 @@ export function QuickNotesWorkspace() {
               <MessageSquareText aria-hidden="true" size={18} className="text-[var(--accent)]" />
             </div>
             <form onSubmit={handleAnswer} className="flex flex-col gap-3 p-4">
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+              <div className="grid gap-3">
                 <div className="grid grid-cols-3 rounded-md border border-[var(--border)] bg-white p-1" role="radiogroup" aria-label="Answer retrieval mode">
                   {searchModeOptions.map((option) => (
                     <button
@@ -592,20 +794,7 @@ export function QuickNotesWorkspace() {
                     </button>
                   ))}
                 </div>
-                <select
-                  value={answerDocumentId}
-                  onChange={(event) => setAnswerDocumentId(event.target.value)}
-                  className="h-11 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
-                  disabled={isAnswering}
-                  aria-label="Answer document filter"
-                >
-                  <option value="all">All documents</option>
-                  {documents.map((document) => (
-                    <option key={document.id} value={document.id}>
-                      {document.title}
-                    </option>
-                  ))}
-                </select>
+                <ActiveScope filters={filters} documents={documents} emptyLabel="All documents" />
               </div>
               <div className="flex flex-col gap-2 md:flex-row">
                 <textarea
@@ -646,9 +835,12 @@ export function QuickNotesWorkspace() {
                   <span className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">{answerResponse.model}</span>
                   <span>{answerResponse.retrievedChunks.length} chunks retrieved</span>
                 </div>
+                <ActiveScope filters={answerResponse.filters} documents={documents} />
                 {answerResponse.status === "insufficient_evidence" ? (
                   <p className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-sm leading-6">
-                    {answerResponse.answer}
+                    {hasAppliedFilters(answerResponse.filters)
+                      ? `${answerResponse.answer} The selected filters may be too restrictive.`
+                      : answerResponse.answer}
                   </p>
                 ) : (
                   <AnswerText
@@ -746,28 +938,75 @@ export function QuickNotesWorkspace() {
                 <Tags aria-hidden="true" size={17} className="text-[var(--accent)]" />
               </div>
               {selectedDocument ? (
-                <dl className="grid grid-cols-2 gap-4 p-4 text-sm">
-                  <MetadataItem label="Pages" value={String(selectedDocument.pageCount ?? 0)} />
-                  <MetadataItem label="Chunks" value={String(selectedDocument.chunkCount)} />
-                  <MetadataItem label="Size" value={formatFileSize(selectedDocument.fileSize)} />
-                  <MetadataItem label="Created" value={formatDate(selectedDocument.createdAt)} />
-                  <MetadataItem label="Class" value={selectedDocument.className ?? "None"} />
-                  <MetadataItem label="Topic" value={selectedDocument.topic ?? "None"} />
-                  <div className="col-span-2">
-                    <dt className="text-xs uppercase tracking-normal text-[var(--muted)]">Tags</dt>
-                    <dd className="mt-1 flex flex-wrap gap-2">
-                      {selectedDocument.tags.length > 0 ? (
-                        selectedDocument.tags.map((tag) => (
-                          <span key={tag} className="rounded-sm bg-[var(--panel-strong)] px-2 py-1 text-xs font-medium">
-                            {tag}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-sm font-medium">None</span>
-                      )}
-                    </dd>
-                  </div>
-                </dl>
+                <form onSubmit={handleMetadataSave} className="flex flex-col gap-3 p-4 text-sm">
+                  <dl className="grid grid-cols-2 gap-4">
+                    <MetadataItem label="Pages" value={String(selectedDocument.pageCount ?? 0)} />
+                    <MetadataItem label="Chunks" value={String(selectedDocument.chunkCount)} />
+                    <MetadataItem label="Size" value={formatFileSize(selectedDocument.fileSize)} />
+                    <MetadataItem label="Created" value={formatDate(selectedDocument.createdAt)} />
+                  </dl>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs uppercase tracking-normal text-[var(--muted)]">Class</span>
+                    <input
+                      value={metadataForm.className}
+                      onChange={(event) => setMetadataForm((current) => ({ ...current, className: event.target.value }))}
+                      className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                      disabled={metadataSaveState === "saving"}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs uppercase tracking-normal text-[var(--muted)]">Topic</span>
+                    <input
+                      value={metadataForm.topic}
+                      onChange={(event) => setMetadataForm((current) => ({ ...current, topic: event.target.value }))}
+                      className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                      disabled={metadataSaveState === "saving"}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs uppercase tracking-normal text-[var(--muted)]">Source</span>
+                    <input
+                      value={metadataForm.source}
+                      onChange={(event) => setMetadataForm((current) => ({ ...current, source: event.target.value }))}
+                      className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                      disabled={metadataSaveState === "saving"}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs uppercase tracking-normal text-[var(--muted)]">Document date</span>
+                    <input
+                      value={metadataForm.documentDate}
+                      onChange={(event) => setMetadataForm((current) => ({ ...current, documentDate: event.target.value }))}
+                      type="date"
+                      className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                      disabled={metadataSaveState === "saving"}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs uppercase tracking-normal text-[var(--muted)]">Tags</span>
+                    <input
+                      value={metadataForm.tags}
+                      onChange={(event) => setMetadataForm((current) => ({ ...current, tags: event.target.value }))}
+                      className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                      disabled={metadataSaveState === "saving"}
+                    />
+                  </label>
+                  <TagPreview tags={splitTags(metadataForm.tags)} />
+                  <button
+                    type="submit"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[var(--foreground)] px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={metadataSaveState === "saving"}
+                    title="Save metadata"
+                  >
+                    {metadataSaveState === "saving" ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : <CheckCircle2 aria-hidden="true" size={16} />}
+                    Save metadata
+                  </button>
+                  {metadataSaveMessage ? (
+                    <p className={`text-sm ${metadataSaveState === "error" ? "text-[#9b1c1c]" : "text-[var(--success)]"}`}>
+                      {metadataSaveMessage}
+                    </p>
+                  ) : null}
+                </form>
               ) : (
                 <p className="p-4 text-sm text-[var(--muted)]">No metadata.</p>
               )}
@@ -794,6 +1033,172 @@ export function QuickNotesWorkspace() {
         </section>
       </div>
     </main>
+  );
+}
+
+function MetadataFilterControls({
+  filters,
+  documents,
+  options,
+  disabled,
+  onChange,
+  onClear
+}: {
+  filters: FilterState;
+  documents: StudyDocumentSummary[];
+  options: MetadataOptionsResponse;
+  disabled: boolean;
+  onChange: (filters: FilterState) => void;
+  onClear: () => void;
+}) {
+  const active = isFilterStateActive(filters);
+
+  function updateList(field: keyof Pick<FilterState, "documentIds" | "classNames" | "topics" | "sources" | "tags">) {
+    return (event: ChangeEvent<HTMLSelectElement>) => {
+      onChange({
+        ...filters,
+        [field]: Array.from(event.target.selectedOptions).map((option) => option.value)
+      });
+    };
+  }
+
+  function updateDate(field: keyof Pick<FilterState, "documentDateFrom" | "documentDateTo">) {
+    return (event: ChangeEvent<HTMLInputElement>) => {
+      onChange({
+        ...filters,
+        [field]: event.target.value
+      });
+    };
+  }
+
+  return (
+    <div className="flex flex-col gap-3 p-4">
+      <FilterSelect
+        label="Documents"
+        values={filters.documentIds}
+        disabled={disabled}
+        onChange={updateList("documentIds")}
+        options={documents.map((document) => ({
+          value: document.id,
+          label: document.title,
+          count: document.chunkCount
+        }))}
+      />
+      <FilterSelect label="Classes" values={filters.classNames} disabled={disabled} onChange={updateList("classNames")} options={options.classes} />
+      <FilterSelect label="Topics" values={filters.topics} disabled={disabled} onChange={updateList("topics")} options={options.topics} />
+      <FilterSelect label="Sources" values={filters.sources} disabled={disabled} onChange={updateList("sources")} options={options.sources} />
+      <FilterSelect label="Tags" values={filters.tags} disabled={disabled} onChange={updateList("tags")} options={options.tags} />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+        <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-normal text-[var(--muted)]">
+          From
+          <input
+            value={filters.documentDateFrom}
+            onChange={updateDate("documentDateFrom")}
+            type="date"
+            className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm font-normal normal-case text-[var(--foreground)] outline-none ring-[var(--accent)] focus:ring-2"
+            disabled={disabled}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-normal text-[var(--muted)]">
+          To
+          <input
+            value={filters.documentDateTo}
+            onChange={updateDate("documentDateTo")}
+            type="date"
+            className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm font-normal normal-case text-[var(--foreground)] outline-none ring-[var(--accent)] focus:ring-2"
+            disabled={disabled}
+          />
+        </label>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold text-[var(--muted)]">{active ? "Filters active" : "No filters active"}</span>
+        <button
+          type="button"
+          onClick={onClear}
+          className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 text-xs font-semibold text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={disabled || !active}
+          title="Clear filters"
+        >
+          <X aria-hidden="true" size={14} />
+          Clear
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FilterSelect({
+  label,
+  values,
+  options,
+  disabled,
+  onChange
+}: {
+  label: string;
+  values: string[];
+  options: Array<{ value: string; count: number; label?: string }>;
+  disabled: boolean;
+  onChange: (event: ChangeEvent<HTMLSelectElement>) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-normal text-[var(--muted)]">
+      {label}
+      <select
+        multiple
+        value={values}
+        onChange={onChange}
+        className="min-h-24 rounded-md border border-[var(--border)] bg-white px-2 py-2 text-sm font-normal normal-case text-[var(--foreground)] outline-none ring-[var(--accent)] focus:ring-2"
+        disabled={disabled || options.length === 0}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label ?? option.value} ({option.count})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ActiveScope({
+  filters,
+  documents,
+  emptyLabel = "Unfiltered scope"
+}: {
+  filters: FilterState | AppliedRetrievalFilters;
+  documents?: StudyDocumentSummary[];
+  emptyLabel?: string;
+}) {
+  const chips = formatFilterChips(filters, documents ?? []);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
+      {chips.length > 0 ? (
+        chips.map((chip) => (
+          <span key={chip} className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">
+            {chip}
+          </span>
+        ))
+      ) : (
+        <span className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">{emptyLabel}</span>
+      )}
+    </div>
+  );
+}
+
+function TagPreview({ tags }: { tags: string[] }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {tags.length > 0 ? (
+        tags.map((tag) => (
+          <span key={tag} className="rounded-sm bg-[var(--panel-strong)] px-2 py-1 text-xs font-medium">
+            {tag}
+          </span>
+        ))
+      ) : (
+        <span className="text-xs font-semibold text-[var(--muted)]">No tags</span>
+      )}
+    </div>
   );
 }
 
@@ -888,6 +1293,100 @@ function CitationReveal({ citation }: { citation: AnswerCitation }) {
       <p className="whitespace-pre-wrap text-sm leading-6">{citation.sourceText}</p>
     </article>
   );
+}
+
+function appendFiltersToSearchParams(parameters: URLSearchParams, filters: FilterState) {
+  appendArrayParameters(parameters, "documentId", filters.documentIds);
+  appendArrayParameters(parameters, "className", filters.classNames);
+  appendArrayParameters(parameters, "topic", filters.topics);
+  appendArrayParameters(parameters, "source", filters.sources);
+  appendArrayParameters(parameters, "tag", filters.tags);
+
+  if (filters.documentDateFrom) {
+    parameters.set("documentDateFrom", filters.documentDateFrom);
+  }
+
+  if (filters.documentDateTo) {
+    parameters.set("documentDateTo", filters.documentDateTo);
+  }
+}
+
+function filtersToPayload(filters: FilterState): RetrievalFilters {
+  return {
+    documentIds: filters.documentIds.length > 0 ? filters.documentIds : undefined,
+    classNames: filters.classNames.length > 0 ? filters.classNames : undefined,
+    topics: filters.topics.length > 0 ? filters.topics : undefined,
+    sources: filters.sources.length > 0 ? filters.sources : undefined,
+    tags: filters.tags.length > 0 ? filters.tags : undefined,
+    documentDateFrom: filters.documentDateFrom || undefined,
+    documentDateTo: filters.documentDateTo || undefined
+  };
+}
+
+function appendArrayParameters(parameters: URLSearchParams, name: string, values: string[]) {
+  for (const value of values) {
+    parameters.append(name, value);
+  }
+}
+
+function splitTags(value: string) {
+  const tags = new Map<string, string>();
+
+  for (const rawTag of value.split(",")) {
+    const tag = rawTag.normalize("NFKC").trim().replace(/\s+/g, " ");
+    const key = tag.toLocaleLowerCase();
+
+    if (tag && !tags.has(key)) {
+      tags.set(key, tag);
+    }
+  }
+
+  return Array.from(tags.values());
+}
+
+function isFilterStateActive(filters: FilterState) {
+  return (
+    filters.documentIds.length > 0 ||
+    filters.classNames.length > 0 ||
+    filters.topics.length > 0 ||
+    filters.sources.length > 0 ||
+    filters.tags.length > 0 ||
+    Boolean(filters.documentDateFrom) ||
+    Boolean(filters.documentDateTo)
+  );
+}
+
+function hasAppliedFilters(filters: AppliedRetrievalFilters) {
+  return (
+    filters.documentIds.length > 0 ||
+    filters.classNames.length > 0 ||
+    filters.topics.length > 0 ||
+    filters.sources.length > 0 ||
+    filters.tags.length > 0 ||
+    Boolean(filters.documentDateFrom) ||
+    Boolean(filters.documentDateTo)
+  );
+}
+
+function formatFilterChips(filters: FilterState | AppliedRetrievalFilters, documents: StudyDocumentSummary[]) {
+  const documentTitles = new Map(documents.map((document) => [document.id, document.title]));
+  const chips: string[] = [];
+
+  chips.push(...filters.documentIds.map((documentId) => `Doc: ${documentTitles.get(documentId) ?? documentId}`));
+  chips.push(...filters.classNames.map((className) => `Class: ${className}`));
+  chips.push(...filters.topics.map((topic) => `Topic: ${topic}`));
+  chips.push(...filters.sources.map((source) => `Source: ${source}`));
+  chips.push(...filters.tags.map((tag) => `Tag: ${tag}`));
+
+  if (filters.documentDateFrom) {
+    chips.push(`From: ${filters.documentDateFrom}`);
+  }
+
+  if (filters.documentDateTo) {
+    chips.push(`To: ${filters.documentDateTo}`);
+  }
+
+  return chips;
 }
 
 function formatUploadMessage(payload: Partial<DocumentUploadResponse>) {

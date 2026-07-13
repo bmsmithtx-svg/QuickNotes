@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import {
+  getDocumentInclude,
   mapDocumentContentResponse,
   type DocumentChunkRow,
   type DocumentPageRow,
@@ -30,14 +31,7 @@ export async function GET(request: Request, { params }: RouteContext) {
     where: {
       id
     },
-    include: {
-      _count: {
-        select: {
-          pages: true,
-          chunks: true
-        }
-      }
-    }
+    include: getDocumentInclude()
   })) as DocumentWithCounts | null;
 
   if (!document) {

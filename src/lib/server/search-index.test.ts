@@ -31,7 +31,7 @@ describe("search index helpers", () => {
       $queryRawUnsafe: async <Result = unknown>(query: string, ...values: unknown[]) => {
         calls.push({ query, values });
         assert.match(query, /"DocumentChunkSearch" MATCH \?/);
-        assert.deepEqual(values, ['"mitochondria" "atp"', "doc_1", "Biology", "cells", '%"exam"%', 5]);
+        assert.deepEqual(values, ['"mitochondria" "atp"', "doc_1", "Biology", "cells", "exam", 5]);
 
         return [
           {
@@ -41,6 +41,8 @@ describe("search index helpers", () => {
             originalFileName: "cell-energy.pdf",
             className: "Biology",
             topic: "cells",
+            source: "Course notes",
+            documentDate: "2026-07-12T00:00:00.000Z",
             tags: '["exam","week 3"]',
             pageNumber: 4,
             chunkIndex: 2,
@@ -65,6 +67,8 @@ describe("search index helpers", () => {
     assert.equal(results[0].documentId, "doc_1");
     assert.equal(results[0].documentTitle, "Cell Energy Notes");
     assert.equal(results[0].originalFileName, "cell-energy.pdf");
+    assert.equal(results[0].source, "Course notes");
+    assert.equal(results[0].documentDate, "2026-07-12");
     assert.equal(results[0].pageNumber, 4);
     assert.equal(results[0].chunkIndex, 2);
     assert.equal(results[0].rank, 1);

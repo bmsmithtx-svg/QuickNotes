@@ -1,7 +1,10 @@
+import { loadScriptEnv } from "./script-env";
 import { MissingOpenAiApiKeyError, requireEmbeddingRuntimeConfig } from "../src/lib/server/embedding-config";
 import { createOpenAIEmbeddingService } from "../src/lib/server/embedding-service";
 import { backfillChunkEmbeddings, type EmbeddingSyncMode } from "../src/lib/server/embedding-sync";
 import { getPrisma } from "../src/lib/server/db";
+
+loadScriptEnv();
 
 type CliOptions = {
   mode: EmbeddingSyncMode;

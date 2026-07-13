@@ -1,5 +1,8 @@
+import { loadScriptEnv } from "./script-env";
 import type { PrismaTransactionLike } from "../src/lib/server/db";
 import { searchHybridChunks, searchSemanticChunks } from "../src/lib/server/retrieval";
+
+loadScriptEnv();
 
 const delegate = {
   findMany: async () => [],
@@ -85,6 +88,8 @@ function row(chunkId: string, pageNumber: number, chunkIndex: number, vector: nu
     originalFileName: "notes.pdf",
     className: "Biology",
     topic: "cells",
+    source: "Course notes",
+    documentDate: null,
     tags: '["exam"]',
     pageNumber,
     chunkIndex,

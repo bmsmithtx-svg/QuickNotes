@@ -1,6 +1,8 @@
 import type { ChunkSearchResult } from "../types";
 import type { PrismaTransactionLike } from "./db";
 import { parseTags } from "./document-mappers";
+import { appendRetrievalFilterSql, getAppliedRetrievalFilters, tagJsonSelect } from "./retrieval-filters";
+import type { RetrievalFilters } from "../types";
 
 export type SearchIndexChunk = {
   id: string;
@@ -15,6 +17,7 @@ export type SearchChunksInput = {
   className?: string;
   topic?: string;
   tag?: string;
+  filters?: RetrievalFilters;
   limit?: number;
 };
 
@@ -25,6 +28,8 @@ type SearchRow = {
   originalFileName: string;
   className: string | null;
   topic: string | null;
+  source: string | null;
+  documentDate: Date | string | null;
   tags: string;
   pageNumber: number;
   chunkIndex: number;
@@ -114,23 +119,9 @@ export async function searchChunks(db: PrismaTransactionLike, input: SearchChunk
 
   const filters: string[] = [];
   const parameters: unknown[] = [normalizedQuery];
+  const appliedFilters = getAppliedRetrievalFilters(input);
 
-  appendDocumentIdFilter(filters, parameters, input);
-
-  if (input.className) {
-    filters.push(`document."className" = ?`);
-    parameters.push(input.className);
-  }
-
-  if (input.topic) {
-    filters.push(`document."topic" = ?`);
-    parameters.push(input.topic);
-  }
-
-  if (input.tag) {
-    filters.push(`document."tags" LIKE ? ESCAPE '\\'`);
-    parameters.push(`%"${escapeLikePattern(input.tag)}"%`);
-  }
+  appendRetrievalFilterSql(filters, parameters, appliedFilters);
 
   const whereClause = filters.length > 0 ? `AND ${filters.join(" AND ")}` : "";
   const limit = clampSearchLimit(input.limit);
@@ -145,7 +136,9 @@ export async function searchChunks(db: PrismaTransactionLike, input: SearchChunk
         document."originalFileName" AS "originalFileName",
         document."className" AS "className",
         document."topic" AS "topic",
-        document."tags" AS "tags",
+        document."source" AS "source",
+        document."documentDate" AS "documentDate",
+        ${tagJsonSelect("document")} AS "tags",
         chunk."pageNumber" AS "pageNumber",
         chunk."chunkIndex" AS "chunkIndex",
         chunk."text" AS "text",
@@ -191,6 +184,8 @@ function mapSearchRows(rows: SearchRow[]): ChunkSearchResult[] {
     originalFileName: row.originalFileName,
     className: row.className,
     topic: row.topic,
+    source: row.source,
+    documentDate: formatRowDate(row.documentDate),
     tags: parseTags(row.tags),
     pageNumber: Number(row.pageNumber),
     chunkIndex: Number(row.chunkIndex),
@@ -273,4 +268,18 @@ export function appendDocumentIdFilter(
 
   filters.push(`document."id" IN (${documentIds.map(() => "?").join(", ")})`);
   parameters.push(...documentIds);
+}
+
+function formatRowDate(value: Date | string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = typeof value === "string" ? new Date(value) : value;
+
+  if (!Number.isFinite(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString().slice(0, 10);
 }

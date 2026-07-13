@@ -6,6 +6,7 @@ import type {
   StudyDocumentSummary,
   StudyDocumentUploadStatus
 } from "../types";
+import { formatDateOnly, normalizeTagsInput } from "./metadata";
 
 export type StudyDocumentRow = {
   id: string;
@@ -16,12 +17,20 @@ export type StudyDocumentRow = {
   title: string;
   className: string | null;
   topic: string | null;
+  source: string | null;
+  documentDate: Date | string | null;
   tags: string;
   uploadStatus: string;
   pageCount: number | null;
   failureReason: string | null;
   createdAt: Date;
   updatedAt: Date;
+  tagLinks?: Array<{
+    tag: {
+      name: string;
+      normalizedName: string;
+    };
+  }>;
 };
 
 export type DocumentPageRow = {
@@ -60,7 +69,9 @@ export function mapStudyDocumentSummary(document: DocumentWithCounts): StudyDocu
     title: document.title,
     className: document.className,
     topic: document.topic,
-    tags: parseTags(document.tags),
+    source: document.source,
+    documentDate: formatDateOnly(document.documentDate),
+    tags: getDocumentTagNames(document),
     uploadStatus: toUploadStatus(document.uploadStatus),
     pageCount: document.pageCount,
     chunkCount: document._count.chunks,
@@ -128,7 +139,7 @@ export function serializeTags(tags: string) {
     .map((tag) => tag.trim())
     .filter(Boolean);
 
-  return JSON.stringify(Array.from(new Set(parsedTags)));
+  return JSON.stringify(normalizeTagsInput(parsedTags).map((tag) => tag.name));
 }
 
 export function parseTags(tags: string): string[] {
@@ -143,6 +154,33 @@ export function parseTags(tags: string): string[] {
   }
 
   return [];
+}
+
+export function getDocumentInclude() {
+  return {
+    tagLinks: {
+      include: {
+        tag: true
+      }
+    },
+    _count: {
+      select: {
+        pages: true,
+        chunks: true
+      }
+    }
+  };
+}
+
+function getDocumentTagNames(document: StudyDocumentRow) {
+  if (document.tagLinks) {
+    return document.tagLinks
+      .map((tagLink) => tagLink.tag.name)
+      .filter(Boolean)
+      .sort((left, right) => left.toLocaleLowerCase().localeCompare(right.toLocaleLowerCase()));
+  }
+
+  return parseTags(document.tags);
 }
 
 function toUploadStatus(status: string): StudyDocumentUploadStatus {

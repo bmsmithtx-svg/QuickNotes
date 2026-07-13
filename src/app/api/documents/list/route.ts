@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { mapStudyDocumentSummary, type DocumentWithCounts } from "@/lib/server/document-mappers";
+import { getDocumentInclude, mapStudyDocumentSummary, type DocumentWithCounts } from "@/lib/server/document-mappers";
 import { getPrisma } from "@/lib/server/db";
 
 export const runtime = "nodejs";
@@ -12,14 +12,7 @@ export async function GET() {
     orderBy: {
       createdAt: "desc"
     },
-    include: {
-      _count: {
-        select: {
-          pages: true,
-          chunks: true
-        }
-      }
-    }
+    include: getDocumentInclude()
   })) as DocumentWithCounts[];
 
   return NextResponse.json({
