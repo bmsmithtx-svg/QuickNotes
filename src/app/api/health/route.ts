@@ -8,9 +8,9 @@ export function GET() {
     capabilities: {
       pdfUpload: "ready",
       textExtraction: "ready",
-      citationBackedAnswers: "planned",
-      hybridRetrieval: "planned",
-      evaluationTests: "planned"
+      citationBackedAnswers: "ready",
+      hybridRetrieval: "ready",
+      evaluationTests: "ready"
     }
   });
 }

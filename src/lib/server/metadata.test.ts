@@ -134,4 +134,23 @@ describe("document tag writes", () => {
       ["deleteMany", "upsertTag", "createDocumentTag", "upsertTag", "createDocumentTag"]
     );
   });
+
+  it("does not issue a deleteMany when the document id is empty", async () => {
+    let deleteCalled = false;
+    const transaction = {
+      documentTag: {
+        deleteMany: async () => {
+          deleteCalled = true;
+          return {};
+        },
+        create: async () => ({})
+      },
+      tag: {
+        upsert: async () => ({ id: "tag_1" })
+      }
+    };
+
+    await assert.rejects(() => replaceDocumentTags(transaction, " ", []), /documentId is required/);
+    assert.equal(deleteCalled, false);
+  });
 });

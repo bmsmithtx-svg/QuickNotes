@@ -14,6 +14,7 @@ Keyword retrieval now uses PostgreSQL full-text search over `DocumentChunk.text`
 
 - Next.js App Router serves the workspace UI and API routes.
 - Prisma targets PostgreSQL with `DATABASE_URL` for runtime traffic and `DIRECT_URL` for migrations.
+- `prisma.config.ts` loads `.env.local` for Prisma CLI commands without moving secrets into tracked files.
 - `StudyDocument`, `DocumentPage`, `DocumentChunk`, `DocumentChunkEmbedding`, `Tag`, and `DocumentTag` are stored in PostgreSQL.
 - `DocumentChunkEmbedding.vector` is a `vector(1536)` pgvector column. `OPENAI_EMBEDDING_DIMENSIONS` must match that column.
 - `pdfjs-dist` extracts PDF text layers.
@@ -31,17 +32,20 @@ Keyword retrieval now uses PostgreSQL full-text search over `DocumentChunk.text`
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-3. Set `DATABASE_URL` to the pooled Supabase connection string for application runtime.
-4. Set `DIRECT_URL` to the direct Supabase PostgreSQL connection string for Prisma migrations.
+3. Set `DATABASE_URL` in `.env.local` to the Supabase transaction-mode pooler connection string for application runtime.
+4. Set `DIRECT_URL` in `.env.local` to the Supabase session-mode pooler connection string for Prisma migrations and schema management.
 5. Run:
 
 ```bash
 npx prisma generate
 npx prisma migrate deploy
 npm run db:validate-vectors
+npm run smoke:app
 ```
 
 The migration also includes `CREATE EXTENSION IF NOT EXISTS vector;` so fresh databases are initialized automatically when the database role has permission.
+
+Supabase's transaction-mode pooler can conflict with prepared statements. Runtime Prisma clients call `withSupabaseTransactionPoolerCompatibility` and add `pgbouncer=true` to Supabase port `6543` URLs when the parameter is not already present. Migration commands use `DIRECT_URL`, which points at the session-mode pooler instead.
 
 ## Environment Variables
 
@@ -54,6 +58,10 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_EMBEDDING_DIMENSIONS=1536
 OPENAI_CHAT_MODEL=gpt-4o-mini
 OPENAI_EVAL_MODEL=
+
+# Required only for destructive test databases.
+QUICKNOTES_TEST_DATABASE=
+QUICKNOTES_ALLOW_DESTRUCTIVE_DB=
 ```
 
 Without an OpenAI key, uploads, document browsing, and keyword search remain usable. Semantic/hybrid retrieval and answer generation need stored embeddings and a valid OpenAI key. Current live OpenAI answer/eval requests may fail when the configured key lacks billing or model permissions; that external rejection is not treated as an application-code failure.
@@ -66,7 +74,7 @@ Local development uses PostgreSQL with pgvector so development and production re
 npm install
 docker compose up -d postgres
 npx prisma generate
-npx prisma migrate dev
+npm run db:migrate:dev
 npm run dev
 ```
 
@@ -75,25 +83,30 @@ Useful database commands:
 ```bash
 npx prisma validate
 npx prisma format
-npx prisma migrate status
-npx prisma migrate deploy
+npm run db:migrate:status
+npm run db:migrate:deploy
 npm run db:validate-vectors
 ```
 
 Reset local data only when you do not need the local database contents:
 
 ```bash
+npm run db:migrate:dev -- --create-only
 npx prisma migrate reset
 docker compose down -v
 docker compose up -d postgres
-npx prisma migrate dev
+npm run db:migrate:dev
 ```
+
+Run destructive commands only against a disposable local database. `scripts/prisma-safe.ts` blocks `prisma migrate reset`, `prisma db push --force-reset`, and `prisma db push --accept-data-loss` unless the target is local or an explicitly marked isolated test database.
 
 There is no seed script yet. Seed local data by uploading PDFs through the app, then run `npm run embeddings:backfill` after OpenAI embedding configuration is available.
 
 ## Migration Details
 
-This milestone replaces the SQLite migration history with PostgreSQL baseline migration `20260713090000_postgres_pgvector_foundation`.
+This milestone replaces the active SQLite migration history with PostgreSQL baseline migration `20260713090000_postgres_pgvector_foundation`.
+
+Active Prisma migrations live in `prisma/migrations` and are PostgreSQL-only. The previous SQLite migration SQL is preserved under `prisma/sqlite-migration-archive` for reference and must not be run against PostgreSQL.
 
 The PostgreSQL schema preserves:
 
@@ -112,7 +125,23 @@ The embedding storage migration changes `DocumentChunkEmbedding` from JSON text 
 - `contentHash`
 - timestamps and chunk relationship
 
-For existing local SQLite data, keep a backup of the old SQLite database and uploaded PDF directory before switching. Import rows into PostgreSQL with their original `id`, `documentId`, page numbers, chunk indexes, metadata fields, and tag links intact, then run:
+The inspected local SQLite database at `prisma/quicknotes.dev.db` contained zero `StudyDocument`, `DocumentPage`, `DocumentChunk`, `DocumentChunkEmbedding`, `Tag`, and `DocumentTag` rows, so no local application data was imported. The file is ignored by Git and intentionally left behind for local reference.
+
+For future local SQLite data, keep a backup of the old SQLite database and uploaded PDF directory before switching. Dry-run the transfer first:
+
+```bash
+npm run db:transfer:sqlite -- --dry-run
+```
+
+Apply only when the target is the intended PostgreSQL database:
+
+```bash
+npm run db:transfer:sqlite -- --apply
+```
+
+The transfer script preserves document, page, chunk, tag, document-tag, date, and compatible embedding relationships by original IDs. It is idempotent through `skipDuplicates` and `ON CONFLICT DO NOTHING`, and it never deletes PostgreSQL/Supabase rows. It copies database rows only; it does not upload locally stored PDFs to production storage.
+
+After transfer, run:
 
 ```bash
 npm run embeddings:backfill
@@ -126,6 +155,8 @@ npm run embeddings:backfill
 npm run embeddings:missing
 npm run embeddings:rebuild
 ```
+
+Rollback is source-controlled for application code and migration files. For Supabase data, use Supabase backups or point-in-time recovery to restore the database to the pre-migration state. Do not use `prisma migrate resolve` to mark migrations applied unless the live schema has been verified to match the migration exactly.
 
 ## Retrieval Semantics
 
@@ -230,7 +261,10 @@ npx prisma migrate status
 npm run typecheck
 npm run lint
 npm run test:unit
+npm run test:db-safety
+npm run test:integration
 npm run eval:offline
+npm run smoke:app
 npm run smoke:retrieval
 npm run smoke:answer
 npm run eval:live
@@ -239,6 +273,8 @@ npm run db:validate-vectors
 ```
 
 `smoke:answer` and `eval:live` require a valid OpenAI key with billing/model access. If OpenAI rejects the request for billing or permissions, keep the failure documented and do not weaken production behavior with mocks.
+
+`test:unit` does not use Supabase. `test:integration` first runs `scripts/test-database-guard.ts`; it fails closed when `DATABASE_URL` points at a non-test Supabase database.
 
 ## Development Log
 
@@ -251,6 +287,10 @@ July 13, 2026:
 - Kept keyword, semantic, and hybrid retrieval modes with deterministic tie ordering and existing RRF behavior.
 - Added Docker Compose local PostgreSQL/pgvector setup.
 - Added idempotent embedding backfill and database/vector validation tooling.
+- Added Prisma CLI `.env.local` loading through `prisma.config.ts`.
+- Archived the SQLite migration SQL outside the active Prisma migration path.
+- Added Supabase-safe migration/test guards and a dry-run SQLite-to-PostgreSQL transfer script.
+- Added a route-level application smoke script for Supabase-backed upload, metadata, search, answer, and embedding checks.
 - Updated unit tests and offline fixtures for the new database-backed retrieval contract.
 
 ## Current Verification
@@ -260,19 +300,23 @@ Verified on July 13, 2026:
 - `npx prisma format`: passed
 - `npx prisma validate`: passed
 - `npx prisma generate`: passed
-- `npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script`: passed
-- `npx prisma migrate status`: blocked because no local PostgreSQL server is reachable at `localhost:54322`; `docker compose up -d postgres` also failed because `docker` is not installed in this environment
+- `npx prisma migrate status`: passed against Supabase after deploy; database schema is up to date
+- `npx prisma migrate deploy`: passed; applied `20260713090000_postgres_pgvector_foundation`
 - `npm run typecheck`: passed
 - `npm run lint`: passed
-- `npm run test:unit`: passed, 56 tests
+- `npm run test:unit`: passed, 60 tests
+- `npm run test:db-safety`: passed
+- `npm run test:integration`: blocked by design because `.env.local` points at a non-test Supabase database
 - `npm run eval:offline`: passed, all tracked rates 1.000
 - `npm run smoke:retrieval`: passed
+- `npm run smoke:app`: passed against Supabase route handlers; uploaded and ingested a PDF, listed/read/updated it, verified keyword/semantic/hybrid filtered search, verified insufficient-evidence answer behavior, and validated fresh embeddings
 - `npm run build`: passed with `next build --webpack`
-- `npm run db:validate-vectors`: blocked because no local PostgreSQL server is reachable at `localhost:54322`
+- `npm run db:validate-vectors`: passed against Supabase
 - `npm run smoke:answer`: OpenAI rejected the configured request; non-secret error: `OpenAI rejected the answer request. Check OPENAI_API_KEY permissions and billing access.`
 - `npm run eval:live`: same OpenAI billing/permission rejection
+- `npm run dev` and `npm run start` did not bind to localhost in the Codex execution environment; route-handler smoke covered the application API paths directly
 
-In the Codex sandbox, `tsx` commands can fail to create their local IPC pipe with `listen EPERM`; rerunning those commands outside the sandbox resolves that local runner issue.
+Package scripts use `node --import tsx` instead of the `tsx` CLI so scripts can run in the Codex sandbox without the `listen EPERM` IPC failure.
 
 ## Current Limitations
 

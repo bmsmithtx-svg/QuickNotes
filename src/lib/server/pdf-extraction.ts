@@ -25,7 +25,8 @@ type PdfPage = {
 type PdfDocument = {
   numPages: number;
   getPage: (pageNumber: number) => Promise<PdfPage>;
-  destroy: () => Promise<void>;
+  cleanup?: () => Promise<void> | void;
+  destroy?: () => Promise<void> | void;
 };
 
 type PdfJsModule = {
@@ -70,7 +71,11 @@ export async function extractPdfTextByPage(buffer: Buffer): Promise<ExtractedPdf
       page.cleanup();
     }
   } finally {
-    await pdfDocument.destroy();
+    if (typeof pdfDocument.destroy === "function") {
+      await pdfDocument.destroy();
+    } else {
+      await pdfDocument.cleanup?.();
+    }
   }
 
   return {

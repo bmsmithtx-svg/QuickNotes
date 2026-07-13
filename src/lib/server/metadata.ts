@@ -238,6 +238,10 @@ export async function replaceDocumentTags(
   documentId: string,
   tags: NormalizedTag[]
 ) {
+  if (!documentId.trim()) {
+    throw new Error("documentId is required before replacing document tags.");
+  }
+
   await transaction.documentTag.deleteMany({
     where: {
       documentId
