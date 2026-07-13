@@ -11,6 +11,7 @@ export type SearchIndexChunk = {
 export type SearchChunksInput = {
   query: string;
   documentId?: string;
+  documentIds?: string[];
   className?: string;
   topic?: string;
   tag?: string;
@@ -114,10 +115,7 @@ export async function searchChunks(db: PrismaTransactionLike, input: SearchChunk
   const filters: string[] = [];
   const parameters: unknown[] = [normalizedQuery];
 
-  if (input.documentId) {
-    filters.push(`document."id" = ?`);
-    parameters.push(input.documentId);
-  }
+  appendDocumentIdFilter(filters, parameters, input);
 
   if (input.className) {
     filters.push(`document."className" = ?`);
@@ -236,4 +234,43 @@ export function clampSearchLimit(limit: number | undefined) {
 
 export function escapeLikePattern(value: string) {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+export function getDocumentFilterIds(input: Pick<SearchChunksInput, "documentId" | "documentIds">) {
+  const ids = new Set<string>();
+
+  if (input.documentId?.trim()) {
+    ids.add(input.documentId.trim());
+  }
+
+  for (const documentId of input.documentIds ?? []) {
+    const normalized = documentId.trim();
+
+    if (normalized) {
+      ids.add(normalized);
+    }
+  }
+
+  return Array.from(ids).sort();
+}
+
+export function appendDocumentIdFilter(
+  filters: string[],
+  parameters: unknown[],
+  input: Pick<SearchChunksInput, "documentId" | "documentIds">
+) {
+  const documentIds = getDocumentFilterIds(input);
+
+  if (documentIds.length === 0) {
+    return;
+  }
+
+  if (documentIds.length === 1) {
+    filters.push(`document."id" = ?`);
+    parameters.push(documentIds[0]);
+    return;
+  }
+
+  filters.push(`document."id" IN (${documentIds.map(() => "?").join(", ")})`);
+  parameters.push(...documentIds);
 }

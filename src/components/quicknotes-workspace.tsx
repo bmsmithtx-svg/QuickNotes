@@ -7,14 +7,18 @@ import {
   Database,
   FileText,
   Loader2,
+  MessageSquareText,
+  Quote,
   RefreshCw,
   Search,
   Tags,
   Upload
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import type {
+  AnswerCitation,
+  AnswerResponse,
   ChunkSearchResult,
   DocumentUploadResponse,
   DocumentContentResponse,
@@ -35,6 +39,10 @@ type SearchErrorPayload = {
   mode?: RetrievalMode;
   actualMode?: RetrievalMode;
   semantic?: SearchModeAvailability;
+};
+
+type AnswerErrorPayload = {
+  error?: string;
 };
 
 const statusLabels: Record<StudyDocumentUploadStatus, string> = {
@@ -77,10 +85,21 @@ export function QuickNotesWorkspace() {
   > | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [answerQuestion, setAnswerQuestion] = useState("");
+  const [answerMode, setAnswerMode] = useState<RetrievalMode>("hybrid");
+  const [answerDocumentId, setAnswerDocumentId] = useState("all");
+  const [answerResponse, setAnswerResponse] = useState<AnswerResponse | null>(null);
+  const [selectedCitationId, setSelectedCitationId] = useState<number | null>(null);
+  const [isAnswering, setIsAnswering] = useState(false);
+  const [answerError, setAnswerError] = useState<string | null>(null);
 
   const selectedDocument = useMemo(
     () => documents.find((document) => document.id === selectedDocumentId) ?? null,
     [documents, selectedDocumentId]
+  );
+  const selectedCitation = useMemo(
+    () => answerResponse?.citations.find((citation) => citation.id === selectedCitationId) ?? null,
+    [answerResponse, selectedCitationId]
   );
 
   const loadDocuments = useCallback(async (nextSelectedId?: string) => {
@@ -265,6 +284,54 @@ export function QuickNotesWorkspace() {
       setSearchMetadata((currentMetadata) => (currentMetadata?.resultCount === 0 ? currentMetadata : null));
     } finally {
       setIsSearching(false);
+    }
+  }
+
+  async function handleAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const question = answerQuestion.trim();
+
+    setAnswerError(null);
+
+    if (!question) {
+      setAnswerResponse(null);
+      setSelectedCitationId(null);
+      return;
+    }
+
+    setIsAnswering(true);
+
+    try {
+      const response = await fetch("/api/answer", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          question,
+          documentIds: answerDocumentId === "all" ? undefined : [answerDocumentId],
+          mode: answerMode,
+          topK: 8
+        })
+      });
+      const payload = (await response.json()) as AnswerResponse | AnswerErrorPayload;
+
+      if (!response.ok || !("status" in payload)) {
+        throw new Error("error" in payload ? payload.error ?? "Answer generation failed." : "Answer generation failed.");
+      }
+
+      setAnswerResponse(payload);
+      setSelectedCitationId(payload.citations[0]?.id ?? null);
+
+      if (payload.retrievedChunks[0]) {
+        setSelectedDocumentId(payload.retrievedChunks[0].documentId);
+      }
+    } catch (error) {
+      setAnswerError(error instanceof Error ? error.message : "Answer generation failed.");
+      setAnswerResponse(null);
+      setSelectedCitationId(null);
+    } finally {
+      setIsAnswering(false);
     }
   }
 
@@ -499,6 +566,121 @@ export function QuickNotesWorkspace() {
             </section>
           </aside>
 
+          <div className="flex flex-col gap-4">
+          <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Ask QuickNotes</h2>
+              </div>
+              <MessageSquareText aria-hidden="true" size={18} className="text-[var(--accent)]" />
+            </div>
+            <form onSubmit={handleAnswer} className="flex flex-col gap-3 p-4">
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+                <div className="grid grid-cols-3 rounded-md border border-[var(--border)] bg-white p-1" role="radiogroup" aria-label="Answer retrieval mode">
+                  {searchModeOptions.map((option) => (
+                    <button
+                      key={option.mode}
+                      type="button"
+                      onClick={() => setAnswerMode(option.mode)}
+                      className={`h-9 rounded-sm text-xs font-semibold ${
+                        answerMode === option.mode ? "bg-[var(--foreground)] text-white" : "text-[var(--muted)]"
+                      }`}
+                      aria-pressed={answerMode === option.mode}
+                      disabled={isAnswering}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <select
+                  value={answerDocumentId}
+                  onChange={(event) => setAnswerDocumentId(event.target.value)}
+                  className="h-11 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                  disabled={isAnswering}
+                  aria-label="Answer document filter"
+                >
+                  <option value="all">All documents</option>
+                  {documents.map((document) => (
+                    <option key={document.id} value={document.id}>
+                      {document.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-2 md:flex-row">
+                <textarea
+                  value={answerQuestion}
+                  onChange={(event) => setAnswerQuestion(event.target.value)}
+                  placeholder="Ask a question about your documents"
+                  className="min-h-24 min-w-0 flex-1 rounded-md border border-[var(--border)] bg-white px-3 py-2 text-sm leading-6 outline-none ring-[var(--accent)] focus:ring-2"
+                  disabled={isAnswering}
+                />
+                <button
+                  type="submit"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[var(--foreground)] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 md:self-start"
+                  disabled={isAnswering}
+                  title="Ask QuickNotes"
+                >
+                  {isAnswering ? (
+                    <Loader2 aria-hidden="true" size={16} className="animate-spin" />
+                  ) : (
+                    <MessageSquareText aria-hidden="true" size={16} />
+                  )}
+                  Ask
+                </button>
+              </div>
+            </form>
+            {answerError ? (
+              <p className="border-t border-[var(--border)] p-4 text-sm text-[#9b1c1c]">{answerError}</p>
+            ) : null}
+            {isAnswering ? (
+              <div className="flex items-center gap-2 border-t border-[var(--border)] p-4 text-sm text-[var(--muted)]">
+                <Loader2 aria-hidden="true" size={16} className="animate-spin" />
+                Answering
+              </div>
+            ) : null}
+            {answerResponse && !isAnswering ? (
+              <div className="border-t border-[var(--border)] p-4">
+                <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
+                  <span className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">{answerResponse.retrievalMode}</span>
+                  <span className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">{answerResponse.model}</span>
+                  <span>{answerResponse.retrievedChunks.length} chunks retrieved</span>
+                </div>
+                {answerResponse.status === "insufficient_evidence" ? (
+                  <p className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-sm leading-6">
+                    {answerResponse.answer}
+                  </p>
+                ) : (
+                  <AnswerText
+                    answer={answerResponse.answer}
+                    citations={answerResponse.citations}
+                    onCitationClick={setSelectedCitationId}
+                  />
+                )}
+                {answerResponse.citations.length > 0 ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {answerResponse.citations.map((citation) => (
+                      <button
+                        key={citation.id}
+                        type="button"
+                        onClick={() => setSelectedCitationId(citation.id)}
+                        className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs font-semibold ${
+                          selectedCitationId === citation.id
+                            ? "border-[var(--foreground)] bg-[var(--foreground)] text-white"
+                            : "border-[var(--border)] bg-white text-[var(--foreground)]"
+                        }`}
+                      >
+                        <Quote aria-hidden="true" size={14} />
+                        {citation.marker} Page {citation.pageNumber}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {selectedCitation ? <CitationReveal citation={selectedCitation} /> : null}
+              </div>
+            ) : null}
+          </section>
+
           <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
             <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 md:flex-row md:items-center md:justify-between">
               <div className="min-w-0">
@@ -555,6 +737,7 @@ export function QuickNotesWorkspace() {
                 : null}
             </div>
           </section>
+          </div>
 
           <aside className="flex flex-col gap-4">
             <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
@@ -639,6 +822,72 @@ function SearchModeNotice({
       : `No stored embeddings found for ${metadata.semantic.model}. Run npm run embeddings:backfill after configuring the API key.`;
 
   return <p className="border-t border-[var(--border)] px-4 py-3 text-xs text-[var(--muted)]">{message}</p>;
+}
+
+function AnswerText({
+  answer,
+  citations,
+  onCitationClick
+}: {
+  answer: string;
+  citations: AnswerCitation[];
+  onCitationClick: (citationId: number) => void;
+}) {
+  const citationIds = new Set(citations.map((citation) => citation.id));
+  const parts: ReactNode[] = [];
+  const markerPattern = /\[(\d+)]/g;
+  let cursor = 0;
+  let match = markerPattern.exec(answer);
+
+  while (match) {
+    const markerStart = match.index;
+    const markerEnd = markerStart + match[0].length;
+    const citationId = Number.parseInt(match[1], 10);
+
+    if (markerStart > cursor) {
+      parts.push(answer.slice(cursor, markerStart));
+    }
+
+    if (citationIds.has(citationId)) {
+      parts.push(
+        <button
+          key={`${citationId}-${markerStart}`}
+          type="button"
+          onClick={() => onCitationClick(citationId)}
+          className="mx-0.5 rounded-sm bg-[var(--panel-strong)] px-1.5 py-0.5 text-xs font-semibold text-[var(--accent-strong)]"
+        >
+          {match[0]}
+        </button>
+      );
+    } else {
+      parts.push(match[0]);
+    }
+
+    cursor = markerEnd;
+    match = markerPattern.exec(answer);
+  }
+
+  if (cursor < answer.length) {
+    parts.push(answer.slice(cursor));
+  }
+
+  return <p className="whitespace-pre-wrap rounded-md border border-[var(--border)] bg-white p-3 text-sm leading-6">{parts}</p>;
+}
+
+function CitationReveal({ citation }: { citation: AnswerCitation }) {
+  return (
+    <article className="mt-4 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
+        <span>{citation.marker}</span>
+        <span className="rounded-sm bg-white px-2 py-1">{citation.documentTitle}</span>
+        <span className="rounded-sm bg-white px-2 py-1">Page {citation.pageNumber}</span>
+        <span className="rounded-sm bg-white px-2 py-1">Rank {citation.retrievalRank}</span>
+        <span>Score {formatScore(citation.retrievalScore)}</span>
+      </div>
+      <p className="mb-2 truncate text-xs text-[var(--muted)]">{citation.documentFileName}</p>
+      <p className="whitespace-pre-wrap text-sm leading-6">{citation.sourceText}</p>
+    </article>
+  );
 }
 
 function formatUploadMessage(payload: Partial<DocumentUploadResponse>) {

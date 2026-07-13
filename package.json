@@ -10,6 +10,7 @@
     "embeddings:missing": "tsx scripts/backfill-embeddings.ts --missing",
     "embeddings:rebuild": "tsx scripts/backfill-embeddings.ts --all",
     "smoke:retrieval": "tsx scripts/retrieval-smoke.ts",
+    "smoke:answer": "tsx scripts/answer-smoke.ts",
     "lint": "node -e \"import('./eslint.config.mjs').then(() => console.log('eslint config ok'))\"",
     "typecheck": "tsc --noEmit --skipLibCheck --project tsconfig.json",
     "test:unit": "node --import tsx --test \"src/**/*.test.ts\""

@@ -7,6 +7,7 @@ import {
   clampSearchLimit,
   escapeLikePattern,
   MAX_SEARCH_LIMIT,
+  appendDocumentIdFilter,
   searchChunks,
   type SearchChunksInput
 } from "./search-index";
@@ -188,10 +189,7 @@ async function getStoredSemanticRows(db: PrismaTransactionLike, input: SearchChu
   const filters: string[] = [`embedding."embeddingModel" = ?`];
   const parameters: unknown[] = [model];
 
-  if (input.documentId) {
-    filters.push(`document."id" = ?`);
-    parameters.push(input.documentId);
-  }
+  appendDocumentIdFilter(filters, parameters, input);
 
   if (input.className) {
     filters.push(`document."className" = ?`);

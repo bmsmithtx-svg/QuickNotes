@@ -133,6 +133,38 @@ export type SearchResponse = {
 
 export type RetrievalMode = "semantic" | "keyword" | "hybrid";
 
+export type AnswerStatus = "answered" | "insufficient_evidence";
+
+export type AnswerCitation = {
+  id: number;
+  marker: string;
+  documentId: string;
+  documentTitle: string;
+  documentFileName: string;
+  pageNumber: number;
+  chunkId: string;
+  chunkIndex: number;
+  sourceText: string;
+  retrievalRank: number;
+  retrievalScore: number;
+  retrievalMetadata: ChunkSearchResult["ranking"];
+};
+
+export type AnswerRetrievedChunk = ChunkSearchResult & {
+  citationId: number;
+  marker: string;
+  sourceText: string;
+};
+
+export type AnswerResponse = {
+  status: AnswerStatus;
+  answer: string;
+  citations: AnswerCitation[];
+  retrievedChunks: AnswerRetrievedChunk[];
+  retrievalMode: RetrievalMode;
+  model: string;
+};
+
 export type StudyAnswer = {
   question: string;
   answer: string;
