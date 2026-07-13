@@ -207,7 +207,8 @@ async function syncUploadedDocumentEmbeddings(
 
   const embeddingService = createOpenAIEmbeddingService({
     apiKey: config.apiKey,
-    model: config.model
+    model: config.model,
+    dimensions: config.dimensions
   });
   const result = await syncChunkEmbeddings(prisma, chunks, embeddingService, {
     mode: "stale"

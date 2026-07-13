@@ -1,33 +1,133 @@
 # QuickNotes
 
-QuickNotes is a local-first study app for learning from uploaded course material. Students can upload PDF textbooks, class notes, and study documents, search extracted chunks, and ask questions that are answered only from retrieved source evidence.
+QuickNotes is a study app for learning from uploaded course material. Students can upload PDF textbooks, class notes, and study documents, search extracted chunks, and ask questions that are answered only from retrieved source evidence.
 
-The current milestone adds document metadata management and end-to-end filtered RAG. QuickNotes still uses Next.js, Prisma, SQLite, SQLite FTS5, local JSON-stored embeddings, and OpenAI for embedding and answer generation when a server-side API key is configured.
+The current milestone establishes the production persistence foundation: Supabase-compatible PostgreSQL through Prisma, pgvector-backed semantic retrieval, PostgreSQL full-text keyword retrieval, local PostgreSQL development through Docker Compose, and database/vector validation tooling. Authentication, Supabase Storage, row-level security, deployment, and cloud PDF lifecycle handling are intentionally out of scope for this milestone.
+
+## Why PostgreSQL And pgvector
+
+PostgreSQL is the production database target because Supabase provides managed Postgres, connection pooling, backups, SQL migrations, and a clean path to later storage/auth integration. pgvector keeps embeddings in the same transactional database as documents, pages, chunks, metadata, tags, and citations, which lets QuickNotes apply document filters before vector ranking and avoids loading every stored embedding into application memory.
+
+Keyword retrieval now uses PostgreSQL full-text search over `DocumentChunk.text`. Semantic retrieval uses pgvector cosine distance over `DocumentChunkEmbedding.vector`. Hybrid retrieval preserves Reciprocal Rank Fusion over keyword and semantic ranks.
 
 ## Architecture
 
 - Next.js App Router serves the workspace UI and API routes.
-- Prisma with local SQLite stores documents, metadata, extracted pages, chunks, FTS data, embeddings, and normalized tags.
+- Prisma targets PostgreSQL with `DATABASE_URL` for runtime traffic and `DIRECT_URL` for migrations.
+- `StudyDocument`, `DocumentPage`, `DocumentChunk`, `DocumentChunkEmbedding`, `Tag`, and `DocumentTag` are stored in PostgreSQL.
+- `DocumentChunkEmbedding.vector` is a `vector(1536)` pgvector column. `OPENAI_EMBEDDING_DIMENSIONS` must match that column.
 - `pdfjs-dist` extracts PDF text layers.
-- SQLite FTS5 powers keyword retrieval through `DocumentChunkSearch`.
-- `DocumentChunkEmbedding` stores normalized OpenAI embedding vectors as JSON for local semantic scans.
-- Hybrid retrieval combines keyword and semantic candidates with Reciprocal Rank Fusion.
+- Local PDF files remain on disk for this milestone.
+- Metadata filters are applied inside SQL before keyword, semantic, or hybrid candidate selection.
 - Answer generation reuses the same retrieval helpers and never runs a separate unfiltered retrieval path.
 - OpenAI calls are isolated in server-side services under `src/lib/server/`.
 
-## Metadata
+## Supabase Setup
 
-Each document can store:
+1. Create a Supabase project.
+2. Enable pgvector in the SQL editor if it is not already enabled:
 
-- `className`: optional string
-- `topic`: optional string
-- `source`: optional string
-- `documentDate`: optional `YYYY-MM-DD` date
-- `tags`: zero or more normalized tags
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
 
-Metadata normalization trims whitespace and stores empty strings as `null`. Tags are stored in normalized `Tag` and `DocumentTag` tables with a case-insensitive `normalizedName`, while the existing `StudyDocument.tags` JSON column is retained only as a compatibility cache. Duplicate tags on the same document are prevented by the `DocumentTag` primary key.
+3. Set `DATABASE_URL` to the pooled Supabase connection string for application runtime.
+4. Set `DIRECT_URL` to the direct Supabase PostgreSQL connection string for Prisma migrations.
+5. Run:
 
-## Filter Semantics
+```bash
+npx prisma generate
+npx prisma migrate deploy
+npm run db:validate-vectors
+```
+
+The migration also includes `CREATE EXTENSION IF NOT EXISTS vector;` so fresh databases are initialized automatically when the database role has permission.
+
+## Environment Variables
+
+```bash
+DATABASE_URL=postgresql://quicknotes:quicknotes@localhost:54322/quicknotes?schema=public
+DIRECT_URL=postgresql://quicknotes:quicknotes@localhost:54322/quicknotes?schema=public
+
+OPENAI_API_KEY=
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_EMBEDDING_DIMENSIONS=1536
+OPENAI_CHAT_MODEL=gpt-4o-mini
+OPENAI_EVAL_MODEL=
+```
+
+Without an OpenAI key, uploads, document browsing, and keyword search remain usable. Semantic/hybrid retrieval and answer generation need stored embeddings and a valid OpenAI key. Current live OpenAI answer/eval requests may fail when the configured key lacks billing or model permissions; that external rejection is not treated as an application-code failure.
+
+## Local PostgreSQL Setup
+
+Local development uses PostgreSQL with pgvector so development and production retrieval behavior stay aligned.
+
+```bash
+npm install
+docker compose up -d postgres
+npx prisma generate
+npx prisma migrate dev
+npm run dev
+```
+
+Useful database commands:
+
+```bash
+npx prisma validate
+npx prisma format
+npx prisma migrate status
+npx prisma migrate deploy
+npm run db:validate-vectors
+```
+
+Reset local data only when you do not need the local database contents:
+
+```bash
+npx prisma migrate reset
+docker compose down -v
+docker compose up -d postgres
+npx prisma migrate dev
+```
+
+There is no seed script yet. Seed local data by uploading PDFs through the app, then run `npm run embeddings:backfill` after OpenAI embedding configuration is available.
+
+## Migration Details
+
+This milestone replaces the SQLite migration history with PostgreSQL baseline migration `20260713090000_postgres_pgvector_foundation`.
+
+The PostgreSQL schema preserves:
+
+- Document IDs and stored PDF filenames
+- Page IDs, page numbers, and page text
+- Chunk IDs, page numbers, chunk indexes, and source text
+- Upload status, failure reason, page counts, and timestamps
+- Class, topic, source, date, legacy JSON tag cache, normalized tags, and document-tag links
+- Citation-safe chunk IDs and source text
+
+The embedding storage migration changes `DocumentChunkEmbedding` from JSON text storage to:
+
+- `embeddingModel`
+- `dimensions`
+- `vector vector(1536)`
+- `contentHash`
+- timestamps and chunk relationship
+
+For existing local SQLite data, keep a backup of the old SQLite database and uploaded PDF directory before switching. Import rows into PostgreSQL with their original `id`, `documentId`, page numbers, chunk indexes, metadata fields, and tag links intact, then run:
+
+```bash
+npm run embeddings:backfill
+npm run db:validate-vectors
+```
+
+The backfill script is idempotent. It skips fresh embeddings, can fill only missing embeddings, and can rebuild all embeddings:
+
+```bash
+npm run embeddings:backfill
+npm run embeddings:missing
+npm run embeddings:rebuild
+```
+
+## Retrieval Semantics
 
 Shared retrieval filters are used by keyword, semantic, hybrid, and answer retrieval:
 
@@ -50,70 +150,18 @@ type RetrievalFilters = {
 - `documentDateFrom` and `documentDateTo` are inclusive `YYYY-MM-DD` boundaries.
 - Empty values are discarded during normalization.
 - Invalid dates or reversed date ranges are rejected.
-- If filters match no documents or no chunks, retrieval returns no chunks; it does not fall back to unfiltered retrieval.
+- Filtered-out chunks cannot influence ranking, answer context, or citations.
+- Semantic ties are ordered deterministically by document ID, page number, chunk index, and chunk ID.
 
-## Metadata APIs
+## APIs
 
-Update document metadata:
-
-```text
-PATCH /api/documents/:id
-Content-Type: application/json
-```
-
-```json
-{
-  "className": "Data Analytics",
-  "topic": "Regression",
-  "source": "Course Textbook",
-  "documentDate": "2026-07-12",
-  "tags": ["statistics", "exam-2"]
-}
-```
-
-The endpoint validates input, returns `400` for invalid payloads, `404` for missing documents, and updates tags transactionally without touching pages, chunks, embeddings, or FTS records.
-
-Metadata options:
-
-```text
-GET /api/documents/metadata-options
-```
-
-Returns deterministic distinct values and document counts for classes, topics, sources, and tags:
-
-```json
-{
-  "classes": [{ "value": "Data Analytics", "count": 2 }],
-  "topics": [{ "value": "Regression", "count": 3 }],
-  "sources": [{ "value": "Course Textbook", "count": 1 }],
-  "tags": [{ "value": "exam-2", "count": 1 }]
-}
-```
-
-## Search API
+Search:
 
 ```text
 GET /api/search?q=regression&mode=hybrid&className=Data%20Analytics&tag=exam-2
 ```
 
-Supported filters can be sent as repeated query parameters or comma-separated values:
-
-```text
-documentId=<id>
-className=<class>
-class=<class>          # backward-compatible alias
-topic=<topic>
-source=<source>
-tag=<tag>
-documentDateFrom=2026-07-01
-documentDateTo=2026-07-31
-limit=<1-50>
-mode=<keyword|semantic|hybrid>
-```
-
-The response includes `filters`, `requestedMode`, `actualMode`, ranking formula metadata, and ranked chunks with citation-safe source text.
-
-## Answer API
+Answer:
 
 ```text
 POST /api/answer
@@ -133,63 +181,32 @@ Content-Type: application/json
 }
 ```
 
-The legacy top-level `documentIds` field is still accepted and merged into `filters.documentIds` internally. The response includes `filters` so clients can show the applied scope. Only chunks that pass server-side filters can be passed to the model, cited, or returned as retrieved chunks.
-
 If filtered retrieval finds no usable chunks, QuickNotes returns:
 
 ```text
 I couldn't find enough information in the selected sources to answer that question.
 ```
 
-## Workspace UI
+## Validation
 
-The workspace includes:
+Database/vector validation reports:
 
-- PDF upload with title, class, topic, source, date, and tag fields
-- Document list and extracted page/chunk preview
-- Editable metadata panel for class, topic, source, document date, and tags
-- Save/loading/error/success state for metadata edits
-- Duplicate-aware tag entry with normalized tag preview
-- Shared filter panel for documents, classes, topics, sources, tags, and date range
-- Clear-all filter action and active-scope chips
-- Search and Ask QuickNotes using the same filters
-- Filter-aware empty states for overly restrictive scopes
-- Citation-backed answer display with clickable source reveals
+- document count
+- page count
+- chunk count
+- embedding count
+- missing embeddings
+- stale embeddings
+- vectors with invalid dimensions
+- duplicate chunks
 
-## Environment Variables
+Run:
 
 ```bash
-OPENAI_API_KEY=
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-OPENAI_CHAT_MODEL=gpt-4o-mini
-OPENAI_EVAL_MODEL=
+npm run db:validate-vectors
 ```
 
-Without an API key, uploads, document browsing, and keyword search remain usable. Semantic/hybrid retrieval and answer generation need embeddings and a valid OpenAI key.
-
-## Local Setup
-
-```bash
-npm install
-npx prisma generate
-npx prisma migrate deploy
-npm run dev
-```
-
-For a fresh local development database, `npx prisma migrate dev` is also fine. Runtime data is ignored by git, including uploaded PDFs, SQLite databases, journals, `.env*` files except `.env.example`, and build output.
-
-## Migration Notes
-
-This milestone adds migration `20260712173000_add_document_metadata_filters`:
-
-- Adds `StudyDocument.source`
-- Adds `StudyDocument.documentDate`
-- Adds metadata indexes for class, topic, source, and document date
-- Adds `Tag`
-- Adds `DocumentTag`
-- Backfills existing JSON tags into normalized tag rows
-
-If a local SQLite database was manually changed before migrations were recorded, repair only the local migration history after confirming the schema objects already exist. Do not reset a database with user data.
+The script loads `.env.local` through the shared script environment helper and fails with actionable errors when `DATABASE_URL`, `DIRECT_URL`, or required embedding configuration is missing. It exits nonzero when missing, stale, invalid-dimension, or duplicate chunk problems are found.
 
 ## Citation And Grounding
 
@@ -206,6 +223,8 @@ Prompt-injection defenses remain in place:
 ## Tests And Evaluation
 
 ```bash
+npx prisma format
+npx prisma validate
 npx prisma generate
 npx prisma migrate status
 npm run typecheck
@@ -216,44 +235,54 @@ npm run smoke:retrieval
 npm run smoke:answer
 npm run eval:live
 npm run build
+npm run db:validate-vectors
 ```
 
-Offline fixtures now include:
+`smoke:answer` and `eval:live` require a valid OpenAI key with billing/model access. If OpenAI rejects the request for billing or permissions, keep the failure documented and do not weaken production behavior with mocks.
 
-- Similar regression terminology in different classes
-- Shared regression topic with different tags
-- A class-filter-dependent answer case
-- A tag-filter-dependent answer case
-- A no-match filtered case
+## Development Log
 
-`eval:offline` reports retrieval metrics and citation correctness separately. `smoke:answer` and `eval:live` require a valid OpenAI key with billing/model access.
+July 13, 2026:
+
+- Moved Prisma from SQLite to PostgreSQL with `DATABASE_URL` and `DIRECT_URL`.
+- Added a PostgreSQL baseline migration with pgvector, vector index, full-text index, and all document/page/chunk/metadata/tag relationships.
+- Replaced JSON embedding persistence with validated pgvector writes.
+- Moved semantic ranking into PostgreSQL/pgvector SQL.
+- Kept keyword, semantic, and hybrid retrieval modes with deterministic tie ordering and existing RRF behavior.
+- Added Docker Compose local PostgreSQL/pgvector setup.
+- Added idempotent embedding backfill and database/vector validation tooling.
+- Updated unit tests and offline fixtures for the new database-backed retrieval contract.
 
 ## Current Verification
 
 Verified on July 13, 2026:
 
+- `npx prisma format`: passed
+- `npx prisma validate`: passed
 - `npx prisma generate`: passed
-- `npx prisma migrate status`: database schema up to date
+- `npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script`: passed
+- `npx prisma migrate status`: blocked because no local PostgreSQL server is reachable at `localhost:54322`; `docker compose up -d postgres` also failed because `docker` is not installed in this environment
 - `npm run typecheck`: passed
 - `npm run lint`: passed
-- `npm run test:unit`: passed, 51 tests
+- `npm run test:unit`: passed, 56 tests
 - `npm run eval:offline`: passed, all tracked rates 1.000
 - `npm run smoke:retrieval`: passed
-- `npm run smoke:answer`: OpenAI rejected the configured request; non-secret error: `OpenAI rejected the answer request. Check OPENAI_API_KEY permissions and billing access.`
-- `npm run eval:live`: same OpenAI rejection
 - `npm run build`: passed with `next build --webpack`
+- `npm run db:validate-vectors`: blocked because no local PostgreSQL server is reachable at `localhost:54322`
+- `npm run smoke:answer`: OpenAI rejected the configured request; non-secret error: `OpenAI rejected the answer request. Check OPENAI_API_KEY permissions and billing access.`
+- `npm run eval:live`: same OpenAI billing/permission rejection
 
-In the Codex sandbox, `tsx` commands may fail to create their local IPC pipe with `listen EPERM`; rerunning those commands outside the sandbox resolves that local runner issue.
+In the Codex sandbox, `tsx` commands can fail to create their local IPC pipe with `listen EPERM`; rerunning those commands outside the sandbox resolves that local runner issue.
 
-## Limitations
+## Current Limitations
 
-- Semantic retrieval scans JSON vectors in-process and is intended for local or small datasets.
-- Embeddings are stored as JSON, not in a vector index.
+- `DocumentChunkEmbedding.vector` is fixed at `vector(1536)`; changing embedding dimensions requires a schema migration and full embedding rebuild.
 - Only one embedding row is stored per chunk.
+- Local PDF storage is still filesystem-based.
 - OCR for scanned PDFs is not implemented.
-- No authentication, cloud file storage, managed database, hosted vector store, or deployment configuration is implemented in this milestone.
+- Authentication, Supabase Storage, row-level security, deployment, and cloud document lifecycle handling are not implemented in this milestone.
 - Live answer/eval verification depends on a working OpenAI key with billing/model access.
 
 ## Recommended Next Milestone
 
-Production persistence and deployment readiness, including managed PostgreSQL/vector storage, cloud file storage, authentication, and deployment configuration.
+Cloud PDF storage using Supabase Storage, with durable upload, deletion, and document lifecycle handling.

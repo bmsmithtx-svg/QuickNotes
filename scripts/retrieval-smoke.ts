@@ -39,6 +39,7 @@ const db: PrismaTransactionLike = {
 
 const embeddingService = {
   model: "deterministic-smoke",
+  dimensions: 2,
   embedTexts: async () => [[1, 0]]
 };
 
@@ -95,6 +96,6 @@ function row(chunkId: string, pageNumber: number, chunkIndex: number, vector: nu
     chunkIndex,
     text,
     dimensions: vector.length,
-    vectorJson: JSON.stringify(vector)
+    similarity: vector[0] ?? 0
   };
 }

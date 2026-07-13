@@ -30,7 +30,8 @@ describe("search index helpers", () => {
       },
       $queryRawUnsafe: async <Result = unknown>(query: string, ...values: unknown[]) => {
         calls.push({ query, values });
-        assert.match(query, /"DocumentChunkSearch" MATCH \?/);
+        assert.match(query, /to_tsvector\('english', chunk\."text"\)/);
+        assert.match(query, /websearch_to_tsquery\('english', \$1\)/);
         assert.deepEqual(values, ['"mitochondria" "atp"', "doc_1", "Biology", "cells", "exam", 5]);
 
         return [
@@ -81,10 +82,10 @@ describe("search index helpers", () => {
       chunkIndex: 2,
       sourceChunk: "The mitochondria convert stored energy into ATP for the cell."
     });
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 1);
   });
 
-  it("replaces a document's existing search rows before indexing chunks", async () => {
+  it("keeps search-index sync as a PostgreSQL no-op", async () => {
     const calls: Array<{ query: string; values: unknown[] }> = [];
     const db: PrismaTransactionLike = {
       studyDocument: delegate,
@@ -105,9 +106,6 @@ describe("search index helpers", () => {
       }
     ]);
 
-    assert.match(calls[0].query, /DELETE FROM "DocumentChunkSearch"/);
-    assert.deepEqual(calls[0].values, ["doc_2"]);
-    assert.match(calls[1].query, /INSERT INTO "DocumentChunkSearch"/);
-    assert.deepEqual(calls[1].values, ["chunk_2", "doc_2", "Photosynthesis stores energy in glucose."]);
+    assert.deepEqual(calls, []);
   });
 });

@@ -24,6 +24,24 @@ export function cosineSimilarity(left: number[], right: number[]) {
   return normalizedLeft.reduce((sum, value, index) => sum + value * normalizedRight[index], 0);
 }
 
+export function validateVectorDimensions(vector: number[], expectedDimensions: number) {
+  validateVector(vector);
+
+  if (!Number.isInteger(expectedDimensions) || expectedDimensions <= 0) {
+    throw new Error("Expected embedding dimensions must be a positive integer.");
+  }
+
+  if (vector.length !== expectedDimensions) {
+    throw new Error(`Embedding dimensions mismatch: expected ${expectedDimensions}, got ${vector.length}.`);
+  }
+}
+
+export function serializeVectorForPgvector(vector: number[], expectedDimensions: number) {
+  validateVectorDimensions(vector, expectedDimensions);
+
+  return `[${vector.map((value) => value.toString()).join(",")}]`;
+}
+
 export function parseStoredVector(vectorJson: string, expectedDimensions: number) {
   let parsed: unknown;
 

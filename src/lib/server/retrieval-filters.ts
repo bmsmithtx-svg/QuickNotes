@@ -1,5 +1,6 @@
 import type { AppliedRetrievalFilters, RetrievalFilters } from "../types";
 import { formatDateOnly, normalizeRetrievalFilters, normalizeTagName } from "./metadata";
+import { addSqlParameter, addSqlParameterList } from "./sql";
 
 export type RetrievalFilterSqlOptions = {
   documentAlias?: string;
@@ -41,20 +42,18 @@ export function appendRetrievalFilterSql(
   appendStringListSql(filters, parameters, `${qualifiedDocument}."source"`, appliedFilters.sources);
 
   if (appliedFilters.documentDateFrom) {
-    filters.push(`${qualifiedDocument}."documentDate" >= ?`);
-    parameters.push(dateStart(appliedFilters.documentDateFrom));
+    filters.push(`${qualifiedDocument}."documentDate" >= ${addSqlParameter(parameters, dateOnly(appliedFilters.documentDateFrom))}::date`);
   }
 
   if (appliedFilters.documentDateTo) {
-    filters.push(`${qualifiedDocument}."documentDate" <= ?`);
-    parameters.push(dateEnd(appliedFilters.documentDateTo));
+    filters.push(`${qualifiedDocument}."documentDate" <= ${addSqlParameter(parameters, dateOnly(appliedFilters.documentDateTo))}::date`);
   }
 
   if (appliedFilters.tags.length > 0) {
     const tagLinkAlias = options.tagLinkAlias ?? "filterDocumentTag";
     const tagAlias = options.tagAlias ?? "filterTag";
     const tagKeys = appliedFilters.tags.map(normalizeTagName);
-    const placeholders = tagKeys.map(() => "?").join(", ");
+    const placeholders = addSqlParameterList(parameters, tagKeys);
 
     filters.push(
       `EXISTS (` +
@@ -64,7 +63,6 @@ export function appendRetrievalFilterSql(
         `AND "${tagAlias}"."normalizedName" IN (${placeholders})` +
         `)`
     );
-    parameters.push(...tagKeys);
   }
 }
 
@@ -72,14 +70,13 @@ export function tagJsonSelect(documentAlias = "document") {
   const qualifiedDocument = `"${documentAlias}"`;
 
   return `COALESCE((
-          SELECT json_group_array("orderedTags"."name")
+          SELECT json_agg("orderedTags"."name" ORDER BY "orderedTags"."normalizedName")::text
           FROM (
-            SELECT "tag"."name" AS "name"
+            SELECT "tag"."name" AS "name", "tag"."normalizedName" AS "normalizedName"
             FROM "DocumentTag" AS "documentTag"
             INNER JOIN "Tag" AS "tag"
               ON "tag"."id" = "documentTag"."tagId"
             WHERE "documentTag"."documentId" = ${qualifiedDocument}."id"
-            ORDER BY "tag"."normalizedName" ASC
           ) AS "orderedTags"
         ), ${qualifiedDocument}."tags")`;
 }
@@ -90,19 +87,19 @@ function appendStringListSql(filters: string[], parameters: unknown[], columnSql
   }
 
   if (values.length === 1) {
-    filters.push(`${columnSql} = ?`);
-    parameters.push(values[0]);
+    filters.push(`${columnSql} = ${addSqlParameter(parameters, values[0])}`);
     return;
   }
 
-  filters.push(`${columnSql} IN (${values.map(() => "?").join(", ")})`);
-  parameters.push(...values);
+  filters.push(`${columnSql} IN (${addSqlParameterList(parameters, values)})`);
 }
 
-function dateStart(value: string) {
-  return new Date(`${formatDateOnly(value)}T00:00:00.000Z`);
-}
+function dateOnly(value: string) {
+  const formatted = formatDateOnly(value);
 
-function dateEnd(value: string) {
-  return new Date(`${formatDateOnly(value)}T23:59:59.999Z`);
+  if (!formatted) {
+    throw new Error("Invalid retrieval date filter.");
+  }
+
+  return formatted;
 }

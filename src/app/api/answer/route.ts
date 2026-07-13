@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const hasEmbeddings = await hasStoredEmbeddings(prisma, embeddingConfig.model);
+    const hasEmbeddings = await hasStoredEmbeddings(prisma, embeddingConfig.model, embeddingConfig.dimensions);
 
     if (!hasEmbeddings) {
       return NextResponse.json(
@@ -65,7 +65,8 @@ export async function POST(request: Request) {
       ? undefined
       : createOpenAIEmbeddingService({
           apiKey: embeddingConfig.apiKey,
-          model: embeddingConfig.model
+          model: embeddingConfig.model,
+          dimensions: embeddingConfig.dimensions
         });
   const answerClient = answerConfig.apiKey ? new OpenAIResponsesAnswerClient(answerConfig.apiKey) : undefined;
 

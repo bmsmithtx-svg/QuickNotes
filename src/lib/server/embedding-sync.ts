@@ -4,6 +4,8 @@ import type { PrismaTransactionLike } from "./db";
 import { hashEmbeddingContent } from "./embedding-hash";
 import type { EmbeddingService } from "./embedding-service";
 import { EmbeddingServiceError } from "./embedding-service";
+import { addSqlParameter, addSqlParameterList } from "./sql";
+import { serializeVectorForPgvector } from "./vector-utils";
 
 export type ChunkForEmbedding = {
   id: string;
@@ -25,14 +27,13 @@ export type StoredEmbeddingRow = {
   chunkId: string;
   embeddingModel: string;
   dimensions: number;
-  vectorJson: string;
   contentHash: string;
 };
 
 export async function syncChunkEmbeddings(
   db: PrismaTransactionLike,
   chunks: ChunkForEmbedding[],
-  embeddingService: Pick<EmbeddingService, "embedTexts" | "model">,
+  embeddingService: Pick<EmbeddingService, "embedTexts" | "model" | "dimensions">,
   options: {
     mode?: EmbeddingSyncMode;
   } = {}
@@ -107,6 +108,7 @@ export async function syncChunkEmbeddings(
       await upsertChunkEmbedding(db, {
         chunkId: chunk.id,
         model: embeddingService.model,
+        dimensions: embeddingService.dimensions,
         contentHash: chunk.contentHash,
         vector
       });
@@ -129,7 +131,7 @@ export async function syncChunkEmbeddings(
 
 export async function backfillChunkEmbeddings(
   db: PrismaTransactionLike,
-  embeddingService: Pick<EmbeddingService, "embedTexts" | "model">,
+  embeddingService: Pick<EmbeddingService, "embedTexts" | "model" | "dimensions">,
   options: {
     mode?: EmbeddingSyncMode;
     documentId?: string;
@@ -155,7 +157,8 @@ export async function getEmbeddingRowsByChunkIds(db: PrismaTransactionLike, chun
     return [];
   }
 
-  const placeholders = chunkIds.map(() => "?").join(", ");
+  const parameters: unknown[] = [];
+  const placeholders = addSqlParameterList(parameters, chunkIds);
 
   return db.$queryRawUnsafe<StoredEmbeddingRow[]>(
     `
@@ -163,19 +166,23 @@ export async function getEmbeddingRowsByChunkIds(db: PrismaTransactionLike, chun
         "chunkId" AS "chunkId",
         "embeddingModel" AS "embeddingModel",
         "dimensions" AS "dimensions",
-        "vectorJson" AS "vectorJson",
         "contentHash" AS "contentHash"
       FROM "DocumentChunkEmbedding"
       WHERE "chunkId" IN (${placeholders})
     `,
-    ...chunkIds
+    ...parameters
   );
 }
 
-export async function hasStoredEmbeddings(db: PrismaTransactionLike, model: string) {
+export async function hasStoredEmbeddings(db: PrismaTransactionLike, model: string, dimensions?: number) {
+  const parameters: unknown[] = [];
+  const modelParameter = addSqlParameter(parameters, model);
+  const dimensionsFilter = dimensions
+    ? ` AND "dimensions" = ${addSqlParameter(parameters, dimensions)}`
+    : "";
   const rows = await db.$queryRawUnsafe<Array<{ count: number | bigint }>>(
-    `SELECT COUNT(*) AS "count" FROM "DocumentChunkEmbedding" WHERE "embeddingModel" = ?`,
-    model
+    `SELECT COUNT(*) AS "count" FROM "DocumentChunkEmbedding" WHERE "embeddingModel" = ${modelParameter}${dimensionsFilter}`,
+    ...parameters
   );
   const count = rows[0]?.count ?? 0;
 
@@ -187,10 +194,14 @@ async function upsertChunkEmbedding(
   input: {
     chunkId: string;
     model: string;
+    dimensions?: number;
     contentHash: string;
     vector: number[];
   }
 ) {
+  const dimensions = input.dimensions ?? input.vector.length;
+  const vector = serializeVectorForPgvector(input.vector, dimensions);
+
   await db.$executeRawUnsafe(
     `
       INSERT INTO "DocumentChunkEmbedding" (
@@ -198,24 +209,24 @@ async function upsertChunkEmbedding(
         "chunkId",
         "embeddingModel",
         "dimensions",
-        "vectorJson",
+        "vector",
         "contentHash",
         "createdAt",
         "updatedAt"
       )
-      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $4, $5::vector, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT("chunkId") DO UPDATE SET
         "embeddingModel" = excluded."embeddingModel",
         "dimensions" = excluded."dimensions",
-        "vectorJson" = excluded."vectorJson",
+        "vector" = excluded."vector",
         "contentHash" = excluded."contentHash",
         "updatedAt" = CURRENT_TIMESTAMP
     `,
     randomUUID(),
     input.chunkId,
     input.model,
-    input.vector.length,
-    JSON.stringify(input.vector),
+    dimensions,
+    vector,
     input.contentHash
   );
 }

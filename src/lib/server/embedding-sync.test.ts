@@ -80,11 +80,24 @@ describe("embedding backfill", () => {
     assert.equal(rebuilt.succeeded, 1);
     assert.equal(embeddingService.callCount, 2);
   });
+
+  it("fails clearly when a vector does not match the configured dimensions", async () => {
+    const chunks = [{ id: "chunk_1", text: "alpha notes" }];
+    const db = createEmbeddingDb(chunks);
+    const embeddingService = createFakeEmbeddingService("model-a", 3);
+
+    const result = await backfillChunkEmbeddings(db, embeddingService);
+
+    assert.equal(result.succeeded, 0);
+    assert.equal(result.failed, 1);
+    assert.match(result.errorMessage ?? "", /Embedding dimensions mismatch: expected 3, got 2/);
+  });
 });
 
-function createFakeEmbeddingService(model: string) {
+function createFakeEmbeddingService(model: string, dimensions = 2) {
   return {
     model,
+    dimensions,
     callCount: 0,
     async embedTexts(texts: string[]) {
       this.callCount += 1;
@@ -109,14 +122,12 @@ function createEmbeddingDb(chunks: ChunkForEmbedding[]) {
         const chunkId = values[1] as string;
         const embeddingModel = values[2] as string;
         const dimensions = values[3] as number;
-        const vectorJson = values[4] as string;
         const contentHash = values[5] as string;
 
         embeddings.set(chunkId, {
           chunkId,
           embeddingModel,
           dimensions,
-          vectorJson,
           contentHash
         });
       }

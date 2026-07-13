@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { cosineSimilarity, normalizeVector, parseStoredVector } from "./vector-utils";
+import { cosineSimilarity, normalizeVector, parseStoredVector, serializeVectorForPgvector } from "./vector-utils";
 
 describe("vector utilities", () => {
   it("normalizes vectors to unit length", () => {
@@ -20,5 +20,11 @@ describe("vector utilities", () => {
   it("validates stored vector JSON dimensions", () => {
     assert.deepEqual(parseStoredVector("[0.1,0.2]", 2), [0.1, 0.2]);
     assert.throws(() => parseStoredVector("[0.1]", 2), /dimensions mismatch/);
+  });
+
+  it("serializes pgvector literals and validates dimensions", () => {
+    assert.equal(serializeVectorForPgvector([0.1, -0.2], 2), "[0.1,-0.2]");
+    assert.throws(() => serializeVectorForPgvector([0.1], 2), /Embedding dimensions mismatch/);
+    assert.throws(() => serializeVectorForPgvector([Number.NaN], 1), /non-finite/);
   });
 });

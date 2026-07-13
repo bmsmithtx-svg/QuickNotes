@@ -82,7 +82,8 @@ export async function GET(request: Request) {
       ? undefined
       : createOpenAIEmbeddingService({
           apiKey: embeddingConfig.apiKey,
-          model: embeddingConfig.model
+          model: embeddingConfig.model,
+          dimensions: embeddingConfig.dimensions
         });
   let results: ChunkSearchResult[];
 
@@ -142,7 +143,7 @@ async function getSemanticAvailability(
   }
 
   try {
-    const hasEmbeddings = await hasStoredEmbeddings(prisma, config.model);
+    const hasEmbeddings = await hasStoredEmbeddings(prisma, config.model, config.dimensions);
 
     return {
       semanticAvailable: hasEmbeddings,

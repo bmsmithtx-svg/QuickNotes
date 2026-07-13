@@ -3,6 +3,7 @@ import type { PrismaTransactionLike } from "./db";
 import { parseTags } from "./document-mappers";
 import { appendRetrievalFilterSql, getAppliedRetrievalFilters, tagJsonSelect } from "./retrieval-filters";
 import type { RetrievalFilters } from "../types";
+import { addSqlParameter, addSqlParameterList } from "./sql";
 
 export type SearchIndexChunk = {
   id: string;
@@ -43,25 +44,7 @@ const MAX_FTS_TERMS = 12;
 const PREVIEW_LENGTH = 320;
 
 export async function ensureChunkSearchIndex(db: PrismaTransactionLike) {
-  await db.$executeRawUnsafe(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS "DocumentChunkSearch" USING fts5(
-      "chunkId" UNINDEXED,
-      "documentId" UNINDEXED,
-      "text",
-      tokenize = 'unicode61'
-    )
-  `);
-
-  await db.$executeRawUnsafe(`
-    INSERT INTO "DocumentChunkSearch" ("chunkId", "documentId", "text")
-    SELECT chunk."id", chunk."documentId", chunk."text"
-    FROM "DocumentChunk" AS chunk
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM "DocumentChunkSearch"
-      WHERE "DocumentChunkSearch"."chunkId" = chunk."id"
-    )
-  `);
+  void db;
 }
 
 export async function syncDocumentSearchIndex(
@@ -69,39 +52,17 @@ export async function syncDocumentSearchIndex(
   documentId: string,
   chunks: SearchIndexChunk[]
 ) {
-  await db.$executeRawUnsafe(`DELETE FROM "DocumentChunkSearch" WHERE "documentId" = ?`, documentId);
-
-  for (const chunk of chunks) {
-    await db.$executeRawUnsafe(
-      `INSERT INTO "DocumentChunkSearch" ("chunkId", "documentId", "text") VALUES (?, ?, ?)`,
-      chunk.id,
-      chunk.documentId,
-      chunk.text
-    );
-  }
+  void db;
+  void documentId;
+  void chunks;
 }
 
 export async function rebuildChunkSearchIndex(db: PrismaTransactionLike) {
-  await ensureChunkSearchIndex(db);
-  await db.$executeRawUnsafe(`DELETE FROM "DocumentChunkSearch"`);
-
   const chunks = (await db.documentChunk.findMany({
     select: {
-      id: true,
-      documentId: true,
-      text: true
-    },
-    orderBy: [{ documentId: "asc" }, { pageNumber: "asc" }, { chunkIndex: "asc" }]
+      id: true
+    }
   })) as SearchIndexChunk[];
-
-  for (const chunk of chunks) {
-    await db.$executeRawUnsafe(
-      `INSERT INTO "DocumentChunkSearch" ("chunkId", "documentId", "text") VALUES (?, ?, ?)`,
-      chunk.id,
-      chunk.documentId,
-      chunk.text
-    );
-  }
 
   return {
     indexedChunkCount: chunks.length
@@ -118,14 +79,15 @@ export async function searchChunks(db: PrismaTransactionLike, input: SearchChunk
   await ensureChunkSearchIndex(db);
 
   const filters: string[] = [];
-  const parameters: unknown[] = [normalizedQuery];
+  const parameters: unknown[] = [];
+  const queryParameter = addSqlParameter(parameters, normalizedQuery);
   const appliedFilters = getAppliedRetrievalFilters(input);
 
   appendRetrievalFilterSql(filters, parameters, appliedFilters);
 
   const whereClause = filters.length > 0 ? `AND ${filters.join(" AND ")}` : "";
   const limit = clampSearchLimit(input.limit);
-  parameters.push(limit);
+  const limitParameter = addSqlParameter(parameters, limit);
 
   const rows = await db.$queryRawUnsafe<SearchRow[]>(
     `
@@ -142,16 +104,14 @@ export async function searchChunks(db: PrismaTransactionLike, input: SearchChunk
         chunk."pageNumber" AS "pageNumber",
         chunk."chunkIndex" AS "chunkIndex",
         chunk."text" AS "text",
-        (-1.0 * bm25("DocumentChunkSearch")) AS "score"
-      FROM "DocumentChunkSearch"
-      INNER JOIN "DocumentChunk" AS chunk
-        ON chunk."id" = "DocumentChunkSearch"."chunkId"
+        ts_rank_cd(to_tsvector('english', chunk."text"), websearch_to_tsquery('english', ${queryParameter})) AS "score"
+      FROM "DocumentChunk" AS chunk
       INNER JOIN "StudyDocument" AS document
         ON document."id" = chunk."documentId"
-      WHERE "DocumentChunkSearch" MATCH ?
+      WHERE to_tsvector('english', chunk."text") @@ websearch_to_tsquery('english', ${queryParameter})
       ${whereClause}
-      ORDER BY bm25("DocumentChunkSearch") ASC, chunk."documentId" ASC, chunk."pageNumber" ASC, chunk."chunkIndex" ASC, chunk."id" ASC
-      LIMIT ?
+      ORDER BY "score" DESC, chunk."documentId" ASC, chunk."pageNumber" ASC, chunk."chunkIndex" ASC, chunk."id" ASC
+      LIMIT ${limitParameter}
     `,
     ...parameters
   );
@@ -261,13 +221,11 @@ export function appendDocumentIdFilter(
   }
 
   if (documentIds.length === 1) {
-    filters.push(`document."id" = ?`);
-    parameters.push(documentIds[0]);
+    filters.push(`document."id" = ${addSqlParameter(parameters, documentIds[0])}`);
     return;
   }
 
-  filters.push(`document."id" IN (${documentIds.map(() => "?").join(", ")})`);
-  parameters.push(...documentIds);
+  filters.push(`document."id" IN (${addSqlParameterList(parameters, documentIds)})`);
 }
 
 function formatRowDate(value: Date | string | null) {

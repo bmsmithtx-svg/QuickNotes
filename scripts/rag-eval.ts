@@ -13,6 +13,7 @@ import {
 } from "../src/lib/server/answer-service";
 import type { PrismaTransactionLike } from "../src/lib/server/db";
 import { retrieveChunks, type QueryEmbeddingService } from "../src/lib/server/retrieval";
+import { cosineSimilarity } from "../src/lib/server/vector-utils";
 import type { AnswerCitation, AnswerResponse, AnswerStatus, ChunkSearchResult, RetrievalMode } from "../src/lib/types";
 
 loadScriptEnv();
@@ -451,12 +452,13 @@ function createFixtureDb(fixture: FixtureSet): PrismaTransactionLike {
 
       if (query.includes("DocumentChunkEmbedding")) {
         const model = String(values[0] ?? "");
+        const queryEmbedding = parsePgvectorLiteral(values.find((value) => typeof value === "string" && value.startsWith("[")));
 
         if (model !== fixture.embeddingModel) {
           return [] as Result;
         }
 
-        return filteredChunks.map(toSemanticRow) as Result;
+        return filteredChunks.map((chunk) => toSemanticRow(chunk, queryEmbedding)) as Result;
       }
 
       const normalizedQuery = String(values[0] ?? "");
@@ -472,6 +474,7 @@ function createFixtureEmbeddingService(fixture: FixtureSet): QueryEmbeddingServi
 
   return {
     model: fixture.embeddingModel,
+    dimensions: getFixtureEmbeddingDimensions(fixture),
     embedTexts: async (texts) => texts.map((text) => embeddingsByQuestion.get(text) ?? [0, 0, 0, 0])
   };
 }
@@ -774,9 +777,11 @@ function filterChunksBySqlValues(
   const requestedTagKeys = new Set(
     values.filter((value): value is string => typeof value === "string" && tagKeys.has(value.toLocaleLowerCase()))
   );
-  const dateValues = values.filter((value): value is Date => value instanceof Date);
-  const hasDateFrom = query.includes('"documentDate" >= ?');
-  const hasDateTo = query.includes('"documentDate" <= ?');
+  const dateValues = values
+    .filter((value): value is string => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value))
+    .map((value) => new Date(`${value}T00:00:00.000Z`));
+  const hasDateFrom = /"documentDate" >= \$\d+::date/.test(query);
+  const hasDateTo = /"documentDate" <= \$\d+::date/.test(query);
   const dateFrom = hasDateFrom ? dateValues[0] : null;
   const dateTo = hasDateFrom && hasDateTo ? dateValues[1] : hasDateTo ? dateValues[0] : null;
 
@@ -840,7 +845,7 @@ function keywordRowsForQuery(chunks: FlatFixtureChunk[], normalizedQuery: string
     }));
 }
 
-function toSemanticRow(chunk: FlatFixtureChunk) {
+function toSemanticRow(chunk: FlatFixtureChunk, queryEmbedding: number[]) {
   return {
     chunkId: chunk.id,
     documentId: chunk.documentId,
@@ -855,8 +860,32 @@ function toSemanticRow(chunk: FlatFixtureChunk) {
     chunkIndex: chunk.chunkIndex,
     text: chunk.text,
     dimensions: chunk.embedding.length,
-    vectorJson: JSON.stringify(chunk.embedding)
+    similarity: safeCosineSimilarity(queryEmbedding, chunk.embedding)
   };
+}
+
+function getFixtureEmbeddingDimensions(fixture: FixtureSet) {
+  return fixture.documents.flatMap((document) => document.chunks).find((chunk) => chunk.embedding.length > 0)?.embedding.length ?? 4;
+}
+
+function parsePgvectorLiteral(value: unknown) {
+  if (typeof value !== "string" || !value.startsWith("[") || !value.endsWith("]")) {
+    return [0, 0, 0, 0];
+  }
+
+  return value
+    .slice(1, -1)
+    .split(",")
+    .map((item) => Number.parseFloat(item.trim()))
+    .filter((item) => Number.isFinite(item));
+}
+
+function safeCosineSimilarity(left: number[], right: number[]) {
+  try {
+    return cosineSimilarity(left, right);
+  } catch {
+    return 0;
+  }
 }
 
 function getLimit(values: unknown[]) {

@@ -79,13 +79,13 @@ describe("retrieval filter contract", () => {
 
     appendRetrievalFilterSql(clauses, parameters, filters);
 
-    assert.match(clauses.join(" AND "), /"document"\."id" IN \(\?, \?\)/);
-    assert.match(clauses.join(" AND "), /"document"\."className" IN \(\?, \?\)/);
-    assert.match(clauses.join(" AND "), /"document"\."topic" = \?/);
-    assert.match(clauses.join(" AND "), /"document"\."source" = \?/);
-    assert.match(clauses.join(" AND "), /"document"\."documentDate" >= \?/);
-    assert.match(clauses.join(" AND "), /"document"\."documentDate" <= \?/);
-    assert.match(clauses.join(" AND "), /"filterTag"\."normalizedName" IN \(\?, \?\)/);
+    assert.match(clauses.join(" AND "), /"document"\."id" IN \(\$1, \$2\)/);
+    assert.match(clauses.join(" AND "), /"document"\."className" IN \(\$3, \$4\)/);
+    assert.match(clauses.join(" AND "), /"document"\."topic" = \$5/);
+    assert.match(clauses.join(" AND "), /"document"\."source" = \$6/);
+    assert.match(clauses.join(" AND "), /"document"\."documentDate" >= \$7::date/);
+    assert.match(clauses.join(" AND "), /"document"\."documentDate" <= \$8::date/);
+    assert.match(clauses.join(" AND "), /"filterTag"\."normalizedName" IN \(\$9, \$10\)/);
     assert.deepEqual(parameters.slice(0, 6), ["doc_a", "doc_b", "Biology", "Chemistry", "cells", "Course notes"]);
     assert.equal(parameters.at(-2), "exam");
     assert.equal(parameters.at(-1), "week 3");

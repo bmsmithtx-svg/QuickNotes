@@ -1,4 +1,4 @@
-import { loadScriptEnv } from "./script-env";
+import { loadScriptEnv, requireDatabaseScriptConfig } from "./script-env";
 import { MissingOpenAiApiKeyError, requireEmbeddingRuntimeConfig } from "../src/lib/server/embedding-config";
 import { createOpenAIEmbeddingService } from "../src/lib/server/embedding-service";
 import { backfillChunkEmbeddings, type EmbeddingSyncMode } from "../src/lib/server/embedding-sync";
@@ -13,12 +13,14 @@ type CliOptions = {
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
+  requireDatabaseScriptConfig();
   const config = requireEmbeddingRuntimeConfig();
   const prisma = await getPrisma();
   try {
     const embeddingService = createOpenAIEmbeddingService({
       apiKey: config.apiKey,
-      model: config.model
+      model: config.model,
+      dimensions: config.dimensions
     });
     const result = await backfillChunkEmbeddings(prisma, embeddingService, options);
 

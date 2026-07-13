@@ -28,22 +28,25 @@ export type EmbeddingClientResponse = {
 };
 
 export type EmbeddingClient = {
-  createEmbeddings(input: string[], model: string): Promise<EmbeddingClientResponse>;
+  createEmbeddings(input: string[], model: string, dimensions?: number): Promise<EmbeddingClientResponse>;
 };
 
 export type EmbeddingServiceOptions = {
   model: string;
+  dimensions?: number;
   batchSize?: number;
   client: EmbeddingClient;
 };
 
 export class EmbeddingService {
   readonly model: string;
+  readonly dimensions?: number;
   private readonly batchSize: number;
   private readonly client: EmbeddingClient;
 
-  constructor({ model, batchSize = 64, client }: EmbeddingServiceOptions) {
+  constructor({ model, dimensions, batchSize = 64, client }: EmbeddingServiceOptions) {
     this.model = model;
+    this.dimensions = dimensions;
     this.batchSize = Math.max(1, Math.trunc(batchSize));
     this.client = client;
   }
@@ -57,8 +60,8 @@ export class EmbeddingService {
 
     for (let start = 0; start < texts.length; start += this.batchSize) {
       const batch = texts.slice(start, start + this.batchSize);
-      const response = await this.client.createEmbeddings(batch, this.model);
-      const batchEmbeddings = validateEmbeddingResponse(response, batch.length);
+      const response = await this.client.createEmbeddings(batch, this.model, this.dimensions);
+      const batchEmbeddings = validateEmbeddingResponse(response, batch.length, this.dimensions);
       embeddings.push(...batchEmbeddings.map(normalizeVector));
     }
 
@@ -88,7 +91,7 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
     }
   }
 
-  async createEmbeddings(input: string[], model: string): Promise<EmbeddingClientResponse> {
+  async createEmbeddings(input: string[], model: string, dimensions?: number): Promise<EmbeddingClientResponse> {
     const response = await fetch("https://api.openai.com/v1/embeddings", {
       method: "POST",
       headers: {
@@ -98,6 +101,7 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
       body: JSON.stringify({
         input,
         model,
+        ...(dimensions ? { dimensions } : {}),
         encoding_format: "float"
       })
     });
@@ -119,20 +123,23 @@ export class OpenAIEmbeddingClient implements EmbeddingClient {
 export function createOpenAIEmbeddingService({
   apiKey,
   model,
+  dimensions,
   batchSize
 }: {
   apiKey: string;
   model: string;
+  dimensions?: number;
   batchSize?: number;
 }) {
   return new EmbeddingService({
     model,
+    dimensions,
     batchSize,
     client: new OpenAIEmbeddingClient(apiKey)
   });
 }
 
-function validateEmbeddingResponse(response: EmbeddingClientResponse, expectedCount: number) {
+function validateEmbeddingResponse(response: EmbeddingClientResponse, expectedCount: number, expectedDimensions?: number) {
   if (!Array.isArray(response.data) || response.data.length !== expectedCount) {
     throw new EmbeddingServiceError("OpenAI returned the wrong number of embeddings.", "malformed_response");
   }
@@ -146,6 +153,13 @@ function validateEmbeddingResponse(response: EmbeddingClientResponse, expectedCo
 
       if (!Array.isArray(item.embedding) || item.embedding.length === 0) {
         throw new EmbeddingServiceError("OpenAI returned an empty embedding vector.", "malformed_response");
+      }
+
+      if (expectedDimensions && item.embedding.length !== expectedDimensions) {
+        throw new EmbeddingServiceError(
+          `OpenAI returned ${item.embedding.length} dimensions, but OPENAI_EMBEDDING_DIMENSIONS is ${expectedDimensions}.`,
+          "malformed_response"
+        );
       }
 
       for (const value of item.embedding) {

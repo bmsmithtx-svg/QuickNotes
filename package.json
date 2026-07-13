@@ -9,6 +9,7 @@
     "embeddings:backfill": "tsx scripts/backfill-embeddings.ts",
     "embeddings:missing": "tsx scripts/backfill-embeddings.ts --missing",
     "embeddings:rebuild": "tsx scripts/backfill-embeddings.ts --all",
+    "db:validate-vectors": "tsx scripts/validate-vectors.ts",
     "smoke:retrieval": "tsx scripts/retrieval-smoke.ts",
     "smoke:answer": "tsx scripts/answer-smoke.ts",
     "eval:offline": "tsx scripts/eval-offline.ts",

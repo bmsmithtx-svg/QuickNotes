@@ -3,27 +3,28 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./quicknotes.dev.db"
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model StudyDocument {
   id               String          @id @default(cuid())
-  originalFileName String
+  originalFileName String          @db.Text
   storedFileName   String          @unique
   fileSize         Int
   mimeType         String
-  title            String
+  title            String          @db.Text
   className        String?
   topic            String?
   source           String?
-  documentDate     DateTime?
-  tags             String          @default("[]")
+  documentDate     DateTime?       @db.Date
+  tags             String          @default("[]") @db.Text
   uploadStatus     String          @default("uploaded")
   pageCount        Int?
-  failureReason    String?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  failureReason    String?         @db.Text
+  createdAt        DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime        @updatedAt @db.Timestamptz(6)
   pages            DocumentPage[]
   chunks           DocumentChunk[]
   tagLinks         DocumentTag[]
@@ -37,27 +38,27 @@ model StudyDocument {
 }
 
 model DocumentPage {
-  id          String        @id @default(cuid())
-  documentId  String
-  pageNumber  Int
-  text        String
-  createdAt   DateTime      @default(now())
-  document    StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  id         String        @id @default(cuid())
+  documentId String
+  pageNumber Int
+  text       String        @db.Text
+  createdAt  DateTime      @default(now()) @db.Timestamptz(6)
+  document   StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@unique([documentId, pageNumber])
   @@index([documentId, pageNumber])
 }
 
 model DocumentChunk {
-  id             String        @id @default(cuid())
+  id             String                  @id @default(cuid())
   documentId     String
   pageNumber     Int
   chunkIndex     Int
-  text           String
+  text           String                  @db.Text
   characterCount Int
   tokenEstimate  Int
-  createdAt      DateTime      @default(now())
-  document       StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdAt      DateTime                @default(now()) @db.Timestamptz(6)
+  document       StudyDocument           @relation(fields: [documentId], references: [id], onDelete: Cascade)
   embedding      DocumentChunkEmbedding?
 
   @@unique([documentId, pageNumber, chunkIndex])
@@ -65,17 +66,18 @@ model DocumentChunk {
 }
 
 model DocumentChunkEmbedding {
-  id             String        @id @default(cuid())
-  chunkId        String        @unique
+  id             String                      @id @default(cuid())
+  chunkId        String                      @unique
   embeddingModel String
   dimensions     Int
-  vectorJson     String
+  vector         Unsupported("vector(1536)")
   contentHash    String
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  chunk          DocumentChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+  createdAt      DateTime                    @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime                    @updatedAt @db.Timestamptz(6)
+  chunk          DocumentChunk               @relation(fields: [chunkId], references: [id], onDelete: Cascade)
 
   @@index([embeddingModel])
+  @@index([dimensions])
   @@index([contentHash])
 }
 
@@ -83,8 +85,8 @@ model Tag {
   id             String        @id @default(cuid())
   name           String
   normalizedName String        @unique
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(6)
   documents      DocumentTag[]
 
   @@index([name])
@@ -93,7 +95,7 @@ model Tag {
 model DocumentTag {
   documentId String
   tagId      String
-  createdAt  DateTime      @default(now())
+  createdAt  DateTime      @default(now()) @db.Timestamptz(6)
   document   StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
   tag        Tag           @relation(fields: [tagId], references: [id], onDelete: Cascade)
 

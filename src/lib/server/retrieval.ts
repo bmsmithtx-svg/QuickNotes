@@ -2,7 +2,8 @@ import type { ChunkSearchResult, RetrievalMode } from "../types";
 import { parseTags } from "./document-mappers";
 import type { PrismaTransactionLike } from "./db";
 import { appendRetrievalFilterSql, getAppliedRetrievalFilters, tagJsonSelect } from "./retrieval-filters";
-import { parseStoredVector, cosineSimilarity } from "./vector-utils";
+import { addSqlParameter } from "./sql";
+import { serializeVectorForPgvector } from "./vector-utils";
 import {
   buildTextPreview,
   clampSearchLimit,
@@ -16,6 +17,7 @@ export const HYBRID_RANKING_FORMULA = `score = sum(1 / (${HYBRID_RRF_K} + rank))
 
 export type QueryEmbeddingService = {
   model: string;
+  dimensions?: number;
   embedTexts(texts: string[]): Promise<number[][]>;
 };
 
@@ -33,7 +35,7 @@ type SemanticRow = {
   chunkIndex: number;
   text: string;
   dimensions: number;
-  vectorJson: string;
+  similarity: number;
 };
 
 export async function retrieveChunks(
@@ -70,16 +72,14 @@ export async function searchSemanticChunks(
     return [];
   }
 
-  const rows = await getStoredSemanticRows(db, input, embeddingService.model);
+  const dimensions = embeddingService.dimensions ?? queryEmbedding.length;
+  const queryVector = serializeVectorForPgvector(queryEmbedding, dimensions);
+  const rows = await getStoredSemanticRows(db, input, embeddingService.model, dimensions, queryVector);
   const rankedRows = rows
-    .map((row) => ({
-      row,
-      similarity: cosineSimilarity(queryEmbedding, parseStoredVector(row.vectorJson, Number(row.dimensions)))
-    }))
-    .sort((left, right) => compareSemanticMatches(left, right))
+    .sort(compareSemanticMatches)
     .slice(0, clampSearchLimit(input.limit));
 
-  return rankedRows.map(({ row, similarity }, index) => mapSemanticRow(row, similarity, index + 1));
+  return rankedRows.map((row, index) => mapSemanticRow(row, Number(row.similarity), index + 1));
 }
 
 export async function searchHybridChunks(
@@ -180,18 +180,30 @@ export function getRankingFormula(mode: RetrievalMode) {
   }
 
   if (mode === "semantic") {
-    return "score = cosine_similarity(query_embedding, stored_chunk_embedding)";
+    return "score = 1 - (stored_chunk_embedding <=> query_embedding)";
   }
 
-  return "score = -1 * bm25(DocumentChunkSearch)";
+  return "score = ts_rank_cd(to_tsvector(DocumentChunk.text), websearch_to_tsquery(query))";
 }
 
-async function getStoredSemanticRows(db: PrismaTransactionLike, input: SearchChunksInput, model: string) {
-  const filters: string[] = [`embedding."embeddingModel" = ?`];
-  const parameters: unknown[] = [model];
+async function getStoredSemanticRows(
+  db: PrismaTransactionLike,
+  input: SearchChunksInput,
+  model: string,
+  dimensions: number,
+  queryVector: string
+) {
+  const filters: string[] = [];
+  const parameters: unknown[] = [];
+  const modelParameter = addSqlParameter(parameters, model);
+  const queryVectorParameter = addSqlParameter(parameters, queryVector);
+  const dimensionsParameter = addSqlParameter(parameters, dimensions);
   const appliedFilters = getAppliedRetrievalFilters(input);
 
+  filters.push(`embedding."embeddingModel" = ${modelParameter}`);
+  filters.push(`embedding."dimensions" = ${dimensionsParameter}`);
   appendRetrievalFilterSql(filters, parameters, appliedFilters);
+  const limitParameter = addSqlParameter(parameters, clampSearchLimit(input.limit));
 
   return db.$queryRawUnsafe<SemanticRow[]>(
     `
@@ -209,14 +221,19 @@ async function getStoredSemanticRows(db: PrismaTransactionLike, input: SearchChu
         chunk."chunkIndex" AS "chunkIndex",
         chunk."text" AS "text",
         embedding."dimensions" AS "dimensions",
-        embedding."vectorJson" AS "vectorJson"
+        (1 - (embedding."vector" <=> ${queryVectorParameter}::vector))::double precision AS "similarity"
       FROM "DocumentChunkEmbedding" AS embedding
       INNER JOIN "DocumentChunk" AS chunk
         ON chunk."id" = embedding."chunkId"
       INNER JOIN "StudyDocument" AS document
         ON document."id" = chunk."documentId"
       WHERE ${filters.join(" AND ")}
-      ORDER BY chunk."documentId" ASC, chunk."pageNumber" ASC, chunk."chunkIndex" ASC, chunk."id" ASC
+      ORDER BY embedding."vector" <=> ${queryVectorParameter}::vector ASC,
+        chunk."documentId" ASC,
+        chunk."pageNumber" ASC,
+        chunk."chunkIndex" ASC,
+        chunk."id" ASC
+      LIMIT ${limitParameter}
     `,
     ...parameters
   );
@@ -274,15 +291,15 @@ function reciprocalRankScore(rank: number | undefined) {
 }
 
 function compareSemanticMatches(
-  left: { row: SemanticRow; similarity: number },
-  right: { row: SemanticRow; similarity: number }
+  left: SemanticRow,
+  right: SemanticRow
 ) {
   return (
-    right.similarity - left.similarity ||
-    left.row.documentId.localeCompare(right.row.documentId) ||
-    Number(left.row.pageNumber) - Number(right.row.pageNumber) ||
-    Number(left.row.chunkIndex) - Number(right.row.chunkIndex) ||
-    left.row.chunkId.localeCompare(right.row.chunkId)
+    Number(right.similarity) - Number(left.similarity) ||
+    left.documentId.localeCompare(right.documentId) ||
+    Number(left.pageNumber) - Number(right.pageNumber) ||
+    Number(left.chunkIndex) - Number(right.chunkIndex) ||
+    left.chunkId.localeCompare(right.chunkId)
   );
 }
 

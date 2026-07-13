@@ -34,7 +34,7 @@ function createDb({
   seenQueries = []
 }: {
   keywordRows?: Array<FakeRow & { score: number }>;
-  semanticRows?: Array<FakeRow & { dimensions: number; vectorJson: string }>;
+  semanticRows?: Array<FakeRow & { dimensions: number; similarity: number }>;
   seenQueries?: Array<{ query: string; values: unknown[] }>;
 }): PrismaTransactionLike {
   return {
@@ -56,6 +56,7 @@ function createDb({
 
 const embeddingService = {
   model: "test-embedding",
+  dimensions: 2,
   embedTexts: async () => [[1, 0]]
 };
 
@@ -87,6 +88,24 @@ describe("semantic retrieval", () => {
     });
   });
 
+  it("uses pgvector SQL for database-side semantic ranking", async () => {
+    const seenQueries: Array<{ query: string; values: unknown[] }> = [];
+    const db = createDb({
+      seenQueries,
+      semanticRows: [semanticRow("chunk_a", "doc_1", 1, 1, [1, 0], "Mitochondria make ATP.")]
+    });
+
+    await searchSemanticChunks(db, { query: "ATP", limit: 3 }, embeddingService);
+
+    const semanticQuery = seenQueries.find((query) => query.query.includes("DocumentChunkEmbedding"));
+
+    assert.ok(semanticQuery);
+    assert.match(semanticQuery.query, /embedding\."vector" <=> \$2::vector/);
+    assert.match(semanticQuery.query, /embedding\."dimensions" = \$3/);
+    assert.match(semanticQuery.query, /LIMIT \$4/);
+    assert.deepEqual(semanticQuery.values, ["test-embedding", "[1,0]", 2, 3]);
+  });
+
   it("applies shared metadata filters before semantic ranking", async () => {
     const seenQueries: Array<{ query: string; values: unknown[] }> = [];
     const db = createDb({
@@ -113,10 +132,17 @@ describe("semantic retrieval", () => {
     const semanticQuery = seenQueries.find((query) => query.query.includes("DocumentChunkEmbedding"));
 
     assert.ok(semanticQuery);
-    assert.match(semanticQuery.query, /"document"\."className" = \?/);
-    assert.match(semanticQuery.query, /"filterTag"\."normalizedName" IN \(\?\)/);
-    assert.deepEqual(semanticQuery.values.slice(0, 4), ["test-embedding", "Biology", "cells", new Date("2026-07-01T00:00:00.000Z")]);
-    assert.equal(semanticQuery.values.at(-1), "exam");
+    assert.match(semanticQuery.query, /"document"\."className" = \$4/);
+    assert.match(semanticQuery.query, /"filterTag"\."normalizedName" IN \(\$8\)/);
+    assert.deepEqual(semanticQuery.values.slice(0, 6), [
+      "test-embedding",
+      "[1,0]",
+      2,
+      "Biology",
+      "cells",
+      "2026-07-01"
+    ]);
+    assert.equal(semanticQuery.values.at(-2), "exam");
   });
 });
 
@@ -186,9 +212,9 @@ describe("hybrid retrieval", () => {
     assert.equal(retrievalQueries.length, 2);
 
     for (const query of retrievalQueries) {
-      assert.match(query.query, /"document"\."id" = \?/);
-      assert.match(query.query, /"document"\."source" = \?/);
-      assert.match(query.query, /"filterTag"\."normalizedName" IN \(\?\)/);
+      assert.match(query.query, /"document"\."id" = \$\d+/);
+      assert.match(query.query, /"document"\."source" = \$\d+/);
+      assert.match(query.query, /"filterTag"\."normalizedName" IN \(\$\d+\)/);
       assert.ok(query.values.includes("doc_1"));
       assert.ok(query.values.includes("Course notes"));
       assert.ok(query.values.includes("exam"));
@@ -203,7 +229,11 @@ describe("search mode availability", () => {
   });
 
   it("reports missing API key without requiring network access", () => {
-    assert.equal(getEmbeddingRuntimeConfig({}).model, "text-embedding-3-small");
+    assert.deepEqual(getEmbeddingRuntimeConfig({}), {
+      apiKey: null,
+      model: "text-embedding-3-small",
+      dimensions: 1536
+    });
     assert.throws(() => requireEmbeddingRuntimeConfig({}), /OPENAI_API_KEY is required/);
   });
 });
@@ -222,11 +252,11 @@ function semanticRow(
   chunkIndex: number,
   vector: number[],
   text: string
-): FakeRow & { dimensions: number; vectorJson: string } {
+): FakeRow & { dimensions: number; similarity: number } {
   return {
     ...baseRow(chunkId, pageNumber, chunkIndex, text, documentId),
     dimensions: vector.length,
-    vectorJson: JSON.stringify(vector)
+    similarity: vector[0] ?? 0
   };
 }
 

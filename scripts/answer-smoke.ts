@@ -22,6 +22,7 @@ let lastEmbeddedQuery = "";
 
 const embeddingService = {
   model: "answer-smoke-embedding",
+  dimensions: 2,
   embedTexts: async (texts: string[]) => {
     lastEmbeddedQuery = texts[0] ?? "";
     return [[1, 0]];
@@ -188,7 +189,7 @@ function toSemanticRow(candidate: FakeRow) {
   return {
     ...candidate,
     dimensions: candidate.vector.length,
-    vectorJson: JSON.stringify(candidate.vector)
+    similarity: candidate.vector[0] ?? 0
   };
 }
 
