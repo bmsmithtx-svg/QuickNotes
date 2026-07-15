@@ -206,11 +206,7 @@ export async function processStoredDocument(input: ProcessStoredDocumentInput): 
 
   try {
     const buffer = await withFailureStage("storage_read", async () => {
-      if (!(await storage.exists(document.storageObjectKey))) {
-        throw new Error("Stored source PDF is missing.");
-      }
-
-      return storage.readPdf(document.storageObjectKey);
+      return readStoredSourcePdf(storage, document.storageObjectKey);
     });
 
     await withFailureStage("checksum", async () => {
@@ -299,6 +295,20 @@ export async function processStoredDocument(input: ProcessStoredDocumentInput): 
   } catch (error) {
     await cleanupAfterProcessingFailure(prisma, document.id);
     await markDocumentFailed(prisma, document.id, getLifecycleStage(error), error);
+    throw error;
+  }
+}
+
+async function readStoredSourcePdf(storage: DocumentStorageAdapter, storageObjectKey: string) {
+  try {
+    return await storage.readPdf(storageObjectKey);
+  } catch (error) {
+    if (isStorageObjectMissingError(error)) {
+      throw new Error("Stored source PDF is missing.", {
+        cause: error
+      });
+    }
+
     throw error;
   }
 }
@@ -441,6 +451,18 @@ function validateStoredSource(document: StoredDocumentRecord, buffer: Buffer) {
   if (document.contentSha256 && document.contentSha256 !== sha256Hex(buffer)) {
     throw new Error("Stored source PDF checksum does not match the document record.");
   }
+}
+
+function isStorageObjectMissingError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.message === "missing" || error.message.includes("Storage object is missing") || hasErrorCode(error, "ENOENT");
+}
+
+function hasErrorCode(error: Error, code: string) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
 async function cleanupAfterProcessingFailure(prisma: PrismaClientLike, documentId: string) {

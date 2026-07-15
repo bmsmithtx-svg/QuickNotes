@@ -422,7 +422,7 @@ class SupabaseDocumentStorage implements DocumentStorageAdapter {
     }
 
     if (response.ok) {
-      await response.body?.cancel().catch(() => undefined);
+      await response.arrayBuffer().catch(() => undefined);
       return true;
     }
 

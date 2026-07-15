@@ -41,6 +41,8 @@ type PdfJsModule = {
   };
 };
 
+const PDF_CLEANUP_TIMEOUT_MS = 1000;
+
 export async function extractPdfTextByPage(buffer: Buffer): Promise<ExtractedPdf> {
   const pdfjs = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as PdfJsModule;
   const loadingTask = pdfjs.getDocument({
@@ -67,17 +69,31 @@ export async function extractPdfTextByPage(buffer: Buffer): Promise<ExtractedPdf
       page.cleanup();
     }
   } finally {
-    if (typeof pdfDocument.destroy === "function") {
-      await pdfDocument.destroy();
-    } else {
-      await pdfDocument.cleanup?.();
-    }
+    await cleanupPdfDocument(pdfDocument);
   }
 
   return {
     pageCount: pdfDocument.numPages,
     pages
   };
+}
+
+async function cleanupPdfDocument(pdfDocument: PdfDocument) {
+  const cleanup =
+    typeof pdfDocument.destroy === "function"
+      ? pdfDocument.destroy()
+      : pdfDocument.cleanup?.();
+
+  if (!cleanup) {
+    return;
+  }
+
+  await Promise.race([
+    cleanup,
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, PDF_CLEANUP_TIMEOUT_MS);
+    })
+  ]);
 }
 
 function normalizeTextItems(items: PdfTextItem[]) {
