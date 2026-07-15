@@ -64,7 +64,7 @@ export async function GET(request: Request) {
       {
         error:
           semantic.reason === "missing_api_key"
-            ? "OPENAI_API_KEY is required for semantic and hybrid search. Use keyword search or configure the key."
+            ? "Server AI configuration is required for semantic and hybrid search. Use keyword search or update server configuration."
             : `No embeddings are stored for ${semantic.model}. Run npm run embeddings:backfill before semantic or hybrid search.`,
         requestedMode,
         mode: "keyword",
@@ -99,7 +99,7 @@ export async function GET(request: Request) {
     if (error instanceof EmbeddingServiceError) {
       return NextResponse.json(
         {
-          error: error.message,
+          error: getPublicEmbeddingErrorMessage(error),
           requestedMode: requestedMode ?? "auto",
           mode: actualMode,
           actualMode,
@@ -128,6 +128,18 @@ export async function GET(request: Request) {
   };
 
   return NextResponse.json(response);
+}
+
+function getPublicEmbeddingErrorMessage(error: EmbeddingServiceError) {
+  if (error.code === "missing_api_key") {
+    return "Server AI configuration is required for semantic and hybrid search.";
+  }
+
+  if (error.code === "authentication") {
+    return "The AI provider rejected the embedding request. Check server AI credentials and billing access.";
+  }
+
+  return error.message;
 }
 
 async function getSemanticAvailability(

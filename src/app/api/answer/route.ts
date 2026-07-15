@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     if (!embeddingConfig.apiKey) {
       return NextResponse.json(
         {
-          error: "OPENAI_API_KEY is required for semantic and hybrid answer retrieval.",
+          error: "Server AI configuration is required for semantic and hybrid answer retrieval.",
           retrievalMode: parsed.value.mode,
           model: answerConfig.model
         },
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     if (error instanceof EmbeddingServiceError) {
       return NextResponse.json(
         {
-          error: error.message,
+          error: getPublicEmbeddingErrorMessage(error),
           retrievalMode: parsed.value.mode,
           model: answerConfig.model
         },
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
     if (error instanceof AnswerGenerationError) {
       return NextResponse.json(
         {
-          error: error.message,
+          error: getPublicAnswerErrorMessage(error),
           retrievalMode: parsed.value.mode,
           model: answerConfig.model
         },
@@ -116,4 +116,28 @@ function getAnswerErrorStatus(error: AnswerGenerationError) {
   }
 
   return 502;
+}
+
+function getPublicEmbeddingErrorMessage(error: EmbeddingServiceError) {
+  if (error.code === "missing_api_key") {
+    return "Server AI configuration is required for semantic and hybrid answer retrieval.";
+  }
+
+  if (error.code === "authentication") {
+    return "The AI provider rejected the embedding request. Check server AI credentials and billing access.";
+  }
+
+  return error.message;
+}
+
+function getPublicAnswerErrorMessage(error: AnswerGenerationError) {
+  if (error.code === "missing_api_key") {
+    return "Server AI configuration is required for answer generation.";
+  }
+
+  if (error.code === "authentication") {
+    return "The AI provider rejected the answer request. Check server AI credentials and billing access.";
+  }
+
+  return error.message;
 }

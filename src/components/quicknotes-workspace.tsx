@@ -1337,7 +1337,7 @@ function SearchModeNotice({
 
   const message =
     metadata.semantic.reason === "missing_api_key"
-      ? "Semantic search is unavailable because OPENAI_API_KEY is not configured. Keyword search still works."
+      ? "Semantic search is unavailable because server AI configuration is incomplete. Keyword search still works."
       : `No stored embeddings found for ${metadata.semantic.model}. Run npm run embeddings:backfill after configuring the API key.`;
 
   return <p className="border-t border-[var(--border)] px-4 py-3 text-xs text-[var(--muted)]">{message}</p>;
@@ -1515,7 +1515,7 @@ function formatUploadMessage(payload: Partial<DocumentUploadResponse>) {
   }
 
   if (payload.embeddingStatus === "skipped_missing_api_key") {
-    return `${base} Keyword search is available; semantic search needs OPENAI_API_KEY and backfill.`;
+    return `${base} Keyword search is available; semantic search needs server AI configuration and backfill.`;
   }
 
   return base;
