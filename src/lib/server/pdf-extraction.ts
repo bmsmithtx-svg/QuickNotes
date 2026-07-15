@@ -51,6 +51,7 @@ const PDF_CLEANUP_TIMEOUT_MS = 1000;
 
 export async function extractPdfTextByPage(buffer: Buffer): Promise<ExtractedPdf> {
   await ensurePdfJsNodePolyfills();
+  await ensurePdfJsWorker();
 
   const pdfjs = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as PdfJsModule;
   const loadingTask = pdfjs.getDocument({
@@ -104,6 +105,19 @@ async function ensurePdfJsNodePolyfills() {
   if (!globalThis.Path2D && canvas.Path2D) {
     globalThis.Path2D = canvas.Path2D as typeof Path2D;
   }
+}
+
+async function ensurePdfJsWorker() {
+  const globalScope = globalThis as typeof globalThis & {
+    pdfjsWorker?: unknown;
+  };
+
+  if (globalScope.pdfjsWorker) {
+    return;
+  }
+
+  // @ts-expect-error PDF.js ships this worker side-effect module without a declaration file.
+  await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
 }
 
 async function cleanupPdfDocument(pdfDocument: PdfDocument) {
