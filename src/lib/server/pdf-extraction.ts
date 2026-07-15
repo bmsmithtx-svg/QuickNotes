@@ -41,9 +41,17 @@ type PdfJsModule = {
   };
 };
 
+type PdfJsNodeCanvasModule = {
+  DOMMatrix?: unknown;
+  ImageData?: unknown;
+  Path2D?: unknown;
+};
+
 const PDF_CLEANUP_TIMEOUT_MS = 1000;
 
 export async function extractPdfTextByPage(buffer: Buffer): Promise<ExtractedPdf> {
+  await ensurePdfJsNodePolyfills();
+
   const pdfjs = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as PdfJsModule;
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(buffer),
@@ -76,6 +84,26 @@ export async function extractPdfTextByPage(buffer: Buffer): Promise<ExtractedPdf
     pageCount: pdfDocument.numPages,
     pages
   };
+}
+
+async function ensurePdfJsNodePolyfills() {
+  if (globalThis.DOMMatrix && globalThis.ImageData && globalThis.Path2D) {
+    return;
+  }
+
+  const canvas = (await import("@napi-rs/canvas")) as unknown as PdfJsNodeCanvasModule;
+
+  if (!globalThis.DOMMatrix && canvas.DOMMatrix) {
+    globalThis.DOMMatrix = canvas.DOMMatrix as typeof DOMMatrix;
+  }
+
+  if (!globalThis.ImageData && canvas.ImageData) {
+    globalThis.ImageData = canvas.ImageData as typeof ImageData;
+  }
+
+  if (!globalThis.Path2D && canvas.Path2D) {
+    globalThis.Path2D = canvas.Path2D as typeof Path2D;
+  }
 }
 
 async function cleanupPdfDocument(pdfDocument: PdfDocument) {

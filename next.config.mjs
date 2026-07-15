@@ -1,6 +1,6 @@
 /** @type {import("next").NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ["pdfjs-dist"]
+  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"]
 };
 
 export default nextConfig;
