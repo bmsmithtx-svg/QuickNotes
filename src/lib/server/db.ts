@@ -31,13 +31,9 @@ type PrismaClientModule = {
   PrismaClient: new (options?: { datasources?: { db?: { url?: string } } }) => PrismaClientLike;
 };
 
-const importRuntimeModule = new Function("specifier", "return import(specifier)") as (
-  specifier: string
-) => Promise<unknown>;
-
 export async function getPrisma() {
   if (!globalForPrisma.prisma) {
-    const { PrismaClient } = (await importRuntimeModule("@prisma/client")) as PrismaClientModule;
+    const { PrismaClient } = (await import("@prisma/client")) as PrismaClientModule;
     const runtimeUrl = getPrismaRuntimeDatabaseUrl();
 
     globalForPrisma.prisma = runtimeUrl
