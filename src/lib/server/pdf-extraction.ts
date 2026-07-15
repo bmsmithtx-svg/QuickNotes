@@ -41,12 +41,8 @@ type PdfJsModule = {
   };
 };
 
-const importRuntimeModule = new Function("specifier", "return import(specifier)") as (
-  specifier: string
-) => Promise<unknown>;
-
 export async function extractPdfTextByPage(buffer: Buffer): Promise<ExtractedPdf> {
-  const pdfjs = (await importRuntimeModule("pdfjs-dist/legacy/build/pdf.mjs")) as PdfJsModule;
+  const pdfjs = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as PdfJsModule;
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(buffer),
     disableFontFace: true,
