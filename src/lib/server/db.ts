@@ -4,12 +4,16 @@ type PrismaDelegate = {
   create: (args: unknown) => Promise<unknown>;
   update: (args: unknown) => Promise<unknown>;
   createMany: (args: unknown) => Promise<unknown>;
+  delete?: (args: unknown) => Promise<unknown>;
+  deleteMany?: (args: unknown) => Promise<unknown>;
 };
 
 export type PrismaTransactionLike = {
   studyDocument: PrismaDelegate;
   documentPage: PrismaDelegate;
   documentChunk: PrismaDelegate;
+  documentTag?: PrismaDelegate;
+  tag?: PrismaDelegate;
   $executeRawUnsafe: (query: string, ...values: unknown[]) => Promise<number>;
   $queryRawUnsafe: <Result = unknown>(query: string, ...values: unknown[]) => Promise<Result>;
 };

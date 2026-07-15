@@ -12,7 +12,7 @@ export const studyDocuments: StudyDocument[] = [
     tags: ["osmosis", "diffusion", "membrane"],
     pageCount: 18,
     uploadedAt: "2026-07-02",
-    status: "ready"
+    status: "READY"
   },
   {
     id: "us-history-reconstruction",
@@ -25,7 +25,7 @@ export const studyDocuments: StudyDocument[] = [
     tags: ["amendments", "civil-war", "primary-source"],
     pageCount: 42,
     uploadedAt: "2026-07-02",
-    status: "processing"
+    status: "PROCESSING"
   }
 ];
 

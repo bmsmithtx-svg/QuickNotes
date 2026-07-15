@@ -5,14 +5,17 @@ import {
   BookOpen,
   CheckCircle2,
   Database,
+  ExternalLink,
   Filter,
   FileText,
   Loader2,
   MessageSquareText,
   Quote,
   RefreshCw,
+  RotateCcw,
   Search,
   Tags,
+  Trash2,
   Upload,
   X
 } from "lucide-react";
@@ -101,17 +104,19 @@ const emptyMetadataOptions: MetadataOptionsResponse = {
 };
 
 const statusLabels: Record<StudyDocumentUploadStatus, string> = {
-  uploaded: "Uploaded",
-  processing: "Processing",
-  ready: "Ready",
-  failed: "Failed"
+  UPLOADING: "Uploading",
+  PROCESSING: "Processing",
+  READY: "Ready",
+  FAILED: "Failed",
+  DELETING: "Deleting"
 };
 
 const statusStyles: Record<StudyDocumentUploadStatus, string> = {
-  uploaded: "bg-[#eef3f8] text-[var(--accent-strong)]",
-  processing: "bg-[#fff4d7] text-[var(--warning)]",
-  ready: "bg-[#e8f4ee] text-[var(--success)]",
-  failed: "bg-[#fde8e8] text-[#9b1c1c]"
+  UPLOADING: "bg-[#eef3f8] text-[var(--accent-strong)]",
+  PROCESSING: "bg-[#fff4d7] text-[var(--warning)]",
+  READY: "bg-[#e8f4ee] text-[var(--success)]",
+  FAILED: "bg-[#fde8e8] text-[#9b1c1c]",
+  DELETING: "bg-[#f3f4f6] text-[var(--muted)]"
 };
 
 const searchModeOptions: Array<{ mode: RetrievalMode; label: string }> = [
@@ -159,6 +164,7 @@ export function QuickNotesWorkspace() {
   });
   const [metadataSaveState, setMetadataSaveState] = useState<MetadataSaveState>("idle");
   const [metadataSaveMessage, setMetadataSaveMessage] = useState<string | null>(null);
+  const [documentActionId, setDocumentActionId] = useState<string | null>(null);
 
   const selectedDocument = useMemo(
     () => documents.find((document) => document.id === selectedDocumentId) ?? null,
@@ -500,6 +506,62 @@ export function QuickNotesWorkspace() {
     } catch (error) {
       setMetadataSaveState("error");
       setMetadataSaveMessage(error instanceof Error ? error.message : "Could not save metadata.");
+    }
+  }
+
+  async function handleRetryDocument(document: StudyDocumentSummary) {
+    setUploadError(null);
+    setUploadMessage(null);
+    setDocumentActionId(document.id);
+
+    try {
+      const response = await fetch(`/api/documents/${document.id}/retry`, {
+        method: "POST"
+      });
+      const payload = (await response.json()) as Partial<DocumentUploadResponse> & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Document retry failed.");
+      }
+
+      setUploadMessage(formatUploadMessage(payload));
+      await loadDocuments(document.id);
+      await loadMetadataOptions();
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Document retry failed.");
+    } finally {
+      setDocumentActionId(null);
+    }
+  }
+
+  async function handleDeleteDocument(document: StudyDocumentSummary) {
+    if (!window.confirm(`Delete "${document.title}" and its stored PDF?`)) {
+      return;
+    }
+
+    setUploadError(null);
+    setUploadMessage(null);
+    setDocumentActionId(document.id);
+
+    try {
+      const response = await fetch(`/api/documents/${document.id}`, {
+        method: "DELETE"
+      });
+      const payload = (await response.json()) as { error?: string; status?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Document deletion failed.");
+      }
+
+      setUploadMessage("Document deleted.");
+      setSelectedDocumentId((currentId) => (currentId === document.id ? null : currentId));
+      setContent((currentContent) => (currentContent?.document.id === document.id ? null : currentContent));
+      await loadDocuments();
+      await loadMetadataOptions();
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Document deletion failed.");
+    } finally {
+      setDocumentActionId(null);
     }
   }
 
@@ -879,7 +941,51 @@ export function QuickNotesWorkspace() {
                 <h2 className="truncate text-lg font-semibold">{selectedDocument?.title ?? "Extracted chunks"}</h2>
                 <p className="mt-1 truncate text-sm text-[var(--muted)]">{selectedDocument?.originalFileName ?? "Select a document"}</p>
               </div>
-              {selectedDocument ? <StatusBadge status={selectedDocument.uploadStatus} /> : null}
+              {selectedDocument ? (
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <a
+                    href={`/api/documents/${selectedDocument.id}/source`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 text-xs font-semibold text-[var(--foreground)]"
+                    title="Open source PDF"
+                  >
+                    <ExternalLink aria-hidden="true" size={14} />
+                    Source
+                  </a>
+                  {selectedDocument.uploadStatus === "FAILED" ? (
+                    <button
+                      type="button"
+                      onClick={() => handleRetryDocument(selectedDocument)}
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 text-xs font-semibold text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={documentActionId === selectedDocument.id}
+                      title="Retry document processing"
+                    >
+                      {documentActionId === selectedDocument.id ? (
+                        <Loader2 aria-hidden="true" size={14} className="animate-spin" />
+                      ) : (
+                        <RotateCcw aria-hidden="true" size={14} />
+                      )}
+                      Retry
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteDocument(selectedDocument)}
+                    className="inline-flex h-9 items-center gap-2 rounded-md border border-[#f2caca] bg-white px-3 text-xs font-semibold text-[#9b1c1c] disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={documentActionId === selectedDocument.id || selectedDocument.uploadStatus === "DELETING"}
+                    title="Delete document"
+                  >
+                    {documentActionId === selectedDocument.id ? (
+                      <Loader2 aria-hidden="true" size={14} className="animate-spin" />
+                    ) : (
+                      <Trash2 aria-hidden="true" size={14} />
+                    )}
+                    Delete
+                  </button>
+                  <StatusBadge status={selectedDocument.uploadStatus} />
+                </div>
+              ) : null}
             </div>
 
             {selectedSearchResult && selectedSearchResult.documentId === selectedDocumentId ? (
@@ -944,7 +1050,15 @@ export function QuickNotesWorkspace() {
                     <MetadataItem label="Chunks" value={String(selectedDocument.chunkCount)} />
                     <MetadataItem label="Size" value={formatFileSize(selectedDocument.fileSize)} />
                     <MetadataItem label="Created" value={formatDate(selectedDocument.createdAt)} />
+                    <MetadataItem label="Storage" value={selectedDocument.storageProvider} />
+                    <MetadataItem label="Attempts" value={String(selectedDocument.processingAttemptCount)} />
                   </dl>
+                  {selectedDocument.failureReason ? (
+                    <p className="rounded-md border border-[#f2caca] bg-[#fff7f7] p-3 text-xs leading-5 text-[#9b1c1c]">
+                      {selectedDocument.failureStage ? `${selectedDocument.failureStage}: ` : ""}
+                      {selectedDocument.failureReason}
+                    </p>
+                  ) : null}
                   <label className="flex flex-col gap-1">
                     <span className="text-xs uppercase tracking-normal text-[var(--muted)]">Class</span>
                     <input

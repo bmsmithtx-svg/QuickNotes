@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { loadScriptEnv, requireDatabaseScriptConfig } from "./script-env";
+import { DOCUMENT_UPLOAD_STATUS, toDocumentUploadStatus } from "../src/lib/server/document-lifecycle";
 import { getPrisma } from "../src/lib/server/db";
 import { serializeVectorForPgvector } from "../src/lib/server/vector-utils";
 
@@ -86,12 +87,14 @@ type CreateManyDelegate = {
   createMany: (args: { data: unknown[]; skipDuplicates: boolean }) => Promise<{ count?: number }>;
 };
 
-type TransferPrisma = Omit<Awaited<ReturnType<typeof getPrisma>>, "studyDocument" | "documentPage" | "documentChunk"> & {
+type TransferPrisma = {
   studyDocument: CreateManyDelegate;
   documentPage: CreateManyDelegate;
   documentChunk: CreateManyDelegate;
   tag: CreateManyDelegate;
   documentTag: CreateManyDelegate;
+  $executeRawUnsafe: (query: string, ...values: unknown[]) => Promise<number>;
+  $disconnect?: () => Promise<void>;
 };
 
 loadScriptEnv();
@@ -175,13 +178,19 @@ async function transferRows(prisma: TransferPrisma, source: string, options: Tra
       storedFileName: row.storedFileName,
       fileSize: Number(row.fileSize),
       mimeType: row.mimeType,
+      storageProvider: "local",
+      storageBucket: "local",
+      storageObjectKey: row.storedFileName,
       title: row.title,
       className: row.className,
       topic: row.topic,
       source: row.source,
       documentDate: parseOptionalDate(row.documentDate, true),
       tags: row.tags,
-      uploadStatus: row.uploadStatus,
+      uploadStatus:
+        row.uploadStatus === "uploaded" && row.pageCount !== null
+          ? DOCUMENT_UPLOAD_STATUS.READY
+          : toDocumentUploadStatus(row.uploadStatus),
       pageCount: row.pageCount === null ? null : Number(row.pageCount),
       failureReason: row.failureReason,
       createdAt: parseRequiredDate(row.createdAt),

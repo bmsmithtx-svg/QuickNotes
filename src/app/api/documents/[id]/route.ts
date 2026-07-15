@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
 import {
+  DOCUMENT_UPLOAD_STATUS,
+  DocumentLifecycleError,
+  deleteStoredDocument
+} from "@/lib/server/document-lifecycle";
+import {
   getDocumentInclude,
   mapStudyDocumentDetail,
   type DocumentWithCounts
@@ -103,6 +108,32 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     });
   } catch {
     return NextResponse.json({ error: "Document metadata update failed." }, { status: 500 });
+  }
+}
+
+export async function DELETE(_request: Request, { params }: RouteContext) {
+  const { id } = await params;
+  const prisma = await getPrisma();
+
+  try {
+    const result = await deleteStoredDocument({
+      prisma,
+      documentId: id
+    });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        documentId: id,
+        error:
+          error instanceof DocumentLifecycleError && error.stage === "storage_delete"
+            ? "Document deletion could not remove the stored source PDF."
+            : "Document deletion could not remove the database record.",
+        status: DOCUMENT_UPLOAD_STATUS.DELETING
+      },
+      { status: error instanceof DocumentLifecycleError && error.stage === "storage_delete" ? 503 : 500 }
+    );
   }
 }
 

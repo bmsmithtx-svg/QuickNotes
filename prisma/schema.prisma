@@ -9,28 +9,45 @@ datasource db {
 }
 
 model StudyDocument {
-  id               String          @id @default(cuid())
-  originalFileName String          @db.Text
-  storedFileName   String          @unique
-  fileSize         Int
-  mimeType         String
-  title            String          @db.Text
-  className        String?
-  topic            String?
-  source           String?
-  documentDate     DateTime?       @db.Date
-  tags             String          @default("[]") @db.Text
-  uploadStatus     String          @default("uploaded")
-  pageCount        Int?
-  failureReason    String?         @db.Text
-  createdAt        DateTime        @default(now()) @db.Timestamptz(6)
-  updatedAt        DateTime        @updatedAt @db.Timestamptz(6)
-  pages            DocumentPage[]
-  chunks           DocumentChunk[]
-  tagLinks         DocumentTag[]
+  id                     String          @id @default(cuid())
+  originalFileName       String          @db.Text
+  storedFileName         String          @unique
+  fileSize               Int
+  mimeType               String
+  storageProvider        String          @default("local")
+  storageBucket          String          @default("local")
+  storageObjectKey       String          @db.Text
+  contentSha256          String?         @db.VarChar(64)
+  title                  String          @db.Text
+  className              String?
+  topic                  String?
+  source                 String?
+  documentDate           DateTime?       @db.Date
+  tags                   String          @default("[]") @db.Text
+  uploadStatus           String          @default("UPLOADING")
+  pageCount              Int?
+  failureStage           String?
+  failureReason          String?         @db.Text
+  storageConfirmedAt     DateTime?       @db.Timestamptz(6)
+  processingStartedAt    DateTime?       @db.Timestamptz(6)
+  processingCompletedAt  DateTime?       @db.Timestamptz(6)
+  failedAt               DateTime?       @db.Timestamptz(6)
+  deleteRequestedAt      DateTime?       @db.Timestamptz(6)
+  processingAttemptCount Int             @default(0)
+  createdAt              DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime        @updatedAt @db.Timestamptz(6)
+  pages                  DocumentPage[]
+  chunks                 DocumentChunk[]
+  tagLinks               DocumentTag[]
 
+  @@unique([storageProvider, storageBucket, storageObjectKey])
   @@index([createdAt])
   @@index([uploadStatus])
+  @@index([storageProvider])
+  @@index([storageBucket])
+  @@index([storageObjectKey])
+  @@index([contentSha256])
+  @@index([failureStage])
   @@index([className])
   @@index([topic])
   @@index([source])

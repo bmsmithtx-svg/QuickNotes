@@ -1,36 +1,40 @@
-// @ts-nocheck
-import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { NextResponse } from "next/server";
 
-import { chunkPageText } from "@/lib/chunking";
-import { getEmbeddingRuntimeConfig } from "@/lib/server/embedding-config";
-import { createOpenAIEmbeddingService } from "@/lib/server/embedding-service";
-import { syncChunkEmbeddings, type EmbeddingSyncResult } from "@/lib/server/embedding-sync";
+import {
+  DOCUMENT_UPLOAD_STATUS,
+  DocumentLifecycleError,
+  markDocumentFailed,
+  processStoredDocument,
+  type DocumentLifecycleStage
+} from "@/lib/server/document-lifecycle";
 import { getPrisma } from "@/lib/server/db";
 import {
   normalizeTagsInput,
   parseDateOnly,
-  replaceDocumentTags,
-  serializeNormalizedTags,
-  type MetadataTagTransaction
+  serializeNormalizedTags
 } from "@/lib/server/metadata";
-import { extractPdfTextByPage } from "@/lib/server/pdf-extraction";
-import { ensureChunkSearchIndex, syncDocumentSearchIndex, type SearchIndexChunk } from "@/lib/server/search-index";
-import { ensureLocalStorage, getStoredPdfPath } from "@/lib/server/storage";
+import {
+  createPdfObjectKey,
+  getDocumentStorage,
+  sha256Hex
+} from "@/lib/server/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
-const MAX_PDF_UPLOAD_BYTES = 25 * 1024 * 1024;
+const LOCAL_MAX_PDF_UPLOAD_BYTES = 25 * 1024 * 1024;
+const VERCEL_SAFE_MAX_PDF_UPLOAD_BYTES = 4 * 1024 * 1024;
 
 export async function POST(request: Request) {
   let documentId: string | null = null;
+  let failureStage: DocumentLifecycleStage = "processing";
 
   try {
     const prisma = await getPrisma();
+    const storage = getDocumentStorage();
     const formData = await request.formData();
     const file = formData.get("file");
 
@@ -42,8 +46,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "The uploaded PDF is empty." }, { status: 400 });
     }
 
-    if (file.size > MAX_PDF_UPLOAD_BYTES) {
-      return NextResponse.json({ error: "PDF uploads are limited to 25 MB for local development." }, { status: 413 });
+    const maxPdfUploadBytes = getMaxPdfUploadBytes();
+
+    if (file.size > maxPdfUploadBytes) {
+      return NextResponse.json(
+        { error: `PDF uploads are limited to ${formatMegabytes(maxPdfUploadBytes)} MB for this deployment.` },
+        { status: 413 }
+      );
     }
 
     const originalFileName = sanitizeOriginalFileName(file.name);
@@ -64,199 +73,90 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: metadata.error }, { status: 400 });
     }
 
-    await ensureLocalStorage();
-
-    const storedFileName = `${randomUUID()}.pdf`;
-    await writeFile(getStoredPdfPath(storedFileName), buffer);
+    const contentSha256 = sha256Hex(buffer);
+    const storageObjectKey = createPdfObjectKey();
 
     const document = (await prisma.studyDocument.create({
       data: {
         originalFileName,
-        storedFileName,
+        storedFileName: storageObjectKey,
         fileSize: file.size,
         mimeType: file.type || "application/pdf",
+        storageProvider: storage.provider,
+        storageBucket: storage.bucket,
+        storageObjectKey,
+        contentSha256,
         title: getTextField(formData, "title") || titleFromFileName(originalFileName),
         className: metadata.value.className,
         topic: metadata.value.topic,
         source: metadata.value.source,
         documentDate: metadata.value.documentDate,
         tags: serializeNormalizedTags(metadata.value.tags),
-        uploadStatus: "uploaded"
+        uploadStatus: DOCUMENT_UPLOAD_STATUS.UPLOADING
       }
     })) as { id: string };
     documentId = document.id;
+
+    failureStage = "storage_upload";
+    await storage.uploadPdf({
+      key: storageObjectKey,
+      body: buffer,
+      contentType: file.type || "application/pdf",
+      contentSha256
+    });
 
     await prisma.studyDocument.update({
       where: {
         id: document.id
       },
       data: {
-        uploadStatus: "processing",
+        storageConfirmedAt: new Date(),
+        storageProvider: storage.provider,
+        storageBucket: storage.bucket,
+        storageObjectKey,
+        contentSha256,
         failureReason: null
       }
     });
 
-    const extractedPdf = await extractPdfTextByPage(buffer);
-    const pageRows = extractedPdf.pages.map((page) => ({
+    const processingResult = await processStoredDocument({
+      prisma,
+      storage,
       documentId: document.id,
-      pageNumber: page.pageNumber,
-      text: page.text
-    }));
-    const chunkRows = extractedPdf.pages.flatMap((page) =>
-      chunkPageText({
-        documentId: document.id,
-        pageNumber: page.pageNumber,
-        text: page.text
-      })
-    );
-    let searchableChunks: SearchIndexChunk[] = [];
-
-    await ensureChunkSearchIndex(prisma);
-
-    await prisma.$transaction(async (transaction) => {
-      await replaceDocumentTags(transaction as MetadataTagTransaction, document.id, metadata.value.tags);
-
-      if (pageRows.length > 0) {
-        await transaction.documentPage.createMany({
-          data: pageRows
-        });
-      }
-
-      if (chunkRows.length > 0) {
-        await transaction.documentChunk.createMany({
-          data: chunkRows
-        });
-      }
-
-      searchableChunks = (await transaction.documentChunk.findMany({
-        where: {
-          documentId: document.id
-        },
-        select: {
-          id: true,
-          documentId: true,
-          text: true
-        }
-      })) as SearchIndexChunk[];
-
-      await syncDocumentSearchIndex(transaction, document.id, searchableChunks);
-
-      await transaction.studyDocument.update({
-        where: {
-          id: document.id
-        },
-        data: {
-          uploadStatus: "ready",
-          pageCount: extractedPdf.pageCount,
-          failureReason: null
-        }
-      });
+      tags: metadata.value.tags
     });
-    const embeddingOutcome = await syncUploadedDocumentEmbeddings(prisma, document.id, searchableChunks);
 
     return NextResponse.json(
       {
         documentId: document.id,
         originalFileName,
-        pageCount: extractedPdf.pageCount,
-        chunkCount: chunkRows.length,
-        status: "ready",
-        embeddingStatus: embeddingOutcome.embeddingStatus,
-        embeddingError: embeddingOutcome.embeddingError
+        pageCount: processingResult.pageCount,
+        chunkCount: processingResult.chunkCount,
+        status: processingResult.status,
+        embeddingStatus: processingResult.embeddingStatus
       },
       { status: 201 }
     );
-  } catch {
+  } catch (error) {
     if (documentId) {
-      await markDocumentFailed(documentId);
+      const prisma = await getPrisma();
+
+      await markDocumentFailed(
+        prisma,
+        documentId,
+        error instanceof DocumentLifecycleError ? error.stage : failureStage,
+        error
+      );
     }
 
     return NextResponse.json(
       {
         documentId,
         error: "PDF processing failed.",
-        status: "failed"
+        status: DOCUMENT_UPLOAD_STATUS.FAILED
       },
       { status: 500 }
     );
-  }
-}
-
-async function syncUploadedDocumentEmbeddings(
-  prisma: Awaited<ReturnType<typeof getPrisma>>,
-  documentId: string,
-  chunks: SearchIndexChunk[]
-): Promise<{
-  embeddingStatus: "skipped_missing_api_key" | "complete" | "failed";
-  embeddingError?: string;
-  result?: EmbeddingSyncResult;
-}> {
-  const config = getEmbeddingRuntimeConfig();
-
-  if (chunks.length === 0) {
-    return {
-      embeddingStatus: "complete"
-    };
-  }
-
-  if (!config.apiKey) {
-    return {
-      embeddingStatus: "skipped_missing_api_key"
-    };
-  }
-
-  const embeddingService = createOpenAIEmbeddingService({
-    apiKey: config.apiKey,
-    model: config.model,
-    dimensions: config.dimensions
-  });
-  const result = await syncChunkEmbeddings(prisma, chunks, embeddingService, {
-    mode: "stale"
-  });
-
-  if (result.failed > 0) {
-    const embeddingError =
-      result.errorMessage ??
-      "Embedding generation failed after PDF extraction. Run npm run embeddings:backfill after fixing the embedding configuration.";
-
-    await prisma.studyDocument.update({
-      where: {
-        id: documentId
-      },
-      data: {
-        uploadStatus: "ready",
-        failureReason: `PDF extraction succeeded, but embedding generation failed for ${result.failed} chunk(s). ${embeddingError}`
-      }
-    });
-
-    return {
-      embeddingStatus: "failed",
-      embeddingError,
-      result
-    };
-  }
-
-  return {
-    embeddingStatus: "complete",
-    result
-  };
-}
-
-async function markDocumentFailed(documentId: string) {
-  try {
-    const prisma = await getPrisma();
-
-    await prisma.studyDocument.update({
-      where: {
-        id: documentId
-      },
-      data: {
-        uploadStatus: "failed",
-        failureReason: "PDF processing failed."
-      }
-    });
-  } catch {
-    // Keep the public upload error safe even if failure-state persistence also fails.
   }
 }
 
@@ -331,4 +231,22 @@ function isPdfLike(file: File, originalFileName: string) {
 
 function hasPdfHeader(buffer: Buffer) {
   return buffer.subarray(0, 5).toString("utf8") === "%PDF-";
+}
+
+function getMaxPdfUploadBytes(env: NodeJS.ProcessEnv = process.env) {
+  const configured = env.QUICKNOTES_MAX_PDF_UPLOAD_BYTES?.trim();
+
+  if (configured) {
+    const parsed = Number.parseInt(configured, 10);
+
+    if (Number.isInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return env.VERCEL ? VERCEL_SAFE_MAX_PDF_UPLOAD_BYTES : LOCAL_MAX_PDF_UPLOAD_BYTES;
+}
+
+function formatMegabytes(bytes: number) {
+  return Math.floor((bytes / (1024 * 1024)) * 10) / 10;
 }

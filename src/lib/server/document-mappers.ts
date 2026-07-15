@@ -3,9 +3,9 @@ import type {
   DocumentContentResponse,
   DocumentPagePreview,
   StudyDocumentDetail,
-  StudyDocumentSummary,
-  StudyDocumentUploadStatus
+  StudyDocumentSummary
 } from "../types";
+import { toDocumentUploadStatus } from "./document-lifecycle";
 import { formatDateOnly, normalizeTagsInput } from "./metadata";
 
 export type StudyDocumentRow = {
@@ -14,6 +14,10 @@ export type StudyDocumentRow = {
   storedFileName: string;
   fileSize: number;
   mimeType: string;
+  storageProvider: string;
+  storageBucket: string;
+  storageObjectKey: string;
+  contentSha256: string | null;
   title: string;
   className: string | null;
   topic: string | null;
@@ -22,7 +26,9 @@ export type StudyDocumentRow = {
   tags: string;
   uploadStatus: string;
   pageCount: number | null;
+  failureStage: string | null;
   failureReason: string | null;
+  processingAttemptCount: number;
   createdAt: Date;
   updatedAt: Date;
   tagLinks?: Array<{
@@ -66,15 +72,22 @@ export function mapStudyDocumentSummary(document: DocumentWithCounts): StudyDocu
     storedFileName: document.storedFileName,
     fileSize: document.fileSize,
     mimeType: document.mimeType,
+    storageProvider: document.storageProvider,
+    storageBucket: document.storageBucket,
+    storageObjectKey: document.storageObjectKey,
+    contentSha256: document.contentSha256,
     title: document.title,
     className: document.className,
     topic: document.topic,
     source: document.source,
     documentDate: formatDateOnly(document.documentDate),
     tags: getDocumentTagNames(document),
-    uploadStatus: toUploadStatus(document.uploadStatus),
+    uploadStatus: toDocumentUploadStatus(document.uploadStatus),
     pageCount: document.pageCount,
     chunkCount: document._count.chunks,
+    failureStage: document.failureStage,
+    failureReason: document.failureReason,
+    processingAttemptCount: document.processingAttemptCount,
     createdAt: document.createdAt.toISOString(),
     updatedAt: document.updatedAt.toISOString()
   };
@@ -181,12 +194,4 @@ function getDocumentTagNames(document: StudyDocumentRow) {
   }
 
   return parseTags(document.tags);
-}
-
-function toUploadStatus(status: string): StudyDocumentUploadStatus {
-  if (status === "uploaded" || status === "processing" || status === "ready" || status === "failed") {
-    return status;
-  }
-
-  return "failed";
 }

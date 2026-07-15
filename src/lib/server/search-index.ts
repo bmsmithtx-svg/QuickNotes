@@ -109,6 +109,7 @@ export async function searchChunks(db: PrismaTransactionLike, input: SearchChunk
       INNER JOIN "StudyDocument" AS document
         ON document."id" = chunk."documentId"
       WHERE to_tsvector('english', chunk."text") @@ websearch_to_tsquery('english', ${queryParameter})
+      AND document."uploadStatus" = 'READY'
       ${whereClause}
       ORDER BY "score" DESC, chunk."documentId" ASC, chunk."pageNumber" ASC, chunk."chunkIndex" ASC, chunk."id" ASC
       LIMIT ${limitParameter}

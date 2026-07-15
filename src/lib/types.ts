@@ -1,4 +1,4 @@
-export type StudyDocumentUploadStatus = "uploaded" | "processing" | "ready" | "failed";
+export type StudyDocumentUploadStatus = "UPLOADING" | "PROCESSING" | "READY" | "FAILED" | "DELETING";
 
 export type StudyDocument = {
   id: string;
@@ -20,6 +20,10 @@ export type StudyDocumentSummary = {
   storedFileName: string;
   fileSize: number;
   mimeType: string;
+  storageProvider: string;
+  storageBucket: string;
+  storageObjectKey: string;
+  contentSha256: string | null;
   title: string;
   className: string | null;
   topic: string | null;
@@ -29,6 +33,9 @@ export type StudyDocumentSummary = {
   uploadStatus: StudyDocumentUploadStatus;
   pageCount: number | null;
   chunkCount: number;
+  failureStage: string | null;
+  failureReason: string | null;
+  processingAttemptCount: number;
   createdAt: string;
   updatedAt: string;
 };

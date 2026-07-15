@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 const allowedDeleteManyFiles = new Set([
   "scripts/check-db-safety.ts",
+  "src/lib/server/document-lifecycle.ts",
+  "src/lib/server/document-lifecycle.test.ts",
   "src/lib/server/metadata.ts",
   "src/lib/server/metadata.test.ts"
 ]);

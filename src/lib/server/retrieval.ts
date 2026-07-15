@@ -202,6 +202,7 @@ async function getStoredSemanticRows(
 
   filters.push(`embedding."embeddingModel" = ${modelParameter}`);
   filters.push(`embedding."dimensions" = ${dimensionsParameter}`);
+  filters.push(`document."uploadStatus" = 'READY'`);
   appendRetrievalFilterSql(filters, parameters, appliedFilters);
   const limitParameter = addSqlParameter(parameters, clampSearchLimit(input.limit));
 
