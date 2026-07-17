@@ -1,6 +1,7 @@
 "use client";
 
 import { Lock, LogIn, Mail, UserPlus } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 
@@ -51,7 +52,18 @@ export function AuthForm({ reason }: { reason?: string | null }) {
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-md items-center">
         <section className="qn-panel w-full rounded-md">
           <div className="border-b border-[var(--border)] p-5">
-            <h1 className="text-2xl font-semibold tracking-normal">QuickNotes</h1>
+            <div className="flex flex-col gap-2">
+              <h1 className="text-2xl font-semibold tracking-normal">QuickNotes</h1>
+              <p className="text-xs font-semibold uppercase tracking-normal text-[var(--muted)]">Powered by</p>
+              <Image
+                src="/smittyai-logo.png"
+                alt="SmittyAI"
+                width={240}
+                height={160}
+                priority
+                className="h-auto w-full max-w-60 rounded-sm object-contain"
+              />
+            </div>
             <p className="mt-1 text-sm text-[var(--muted)]">{mode === "sign-in" ? "Sign in to continue." : "Create an account."}</p>
           </div>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5">
