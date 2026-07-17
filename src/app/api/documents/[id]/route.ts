@@ -165,6 +165,7 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
 
 function toDocumentUpdateData(update: DocumentMetadataUpdate) {
   return {
+    ...(Object.hasOwn(update, "title") ? { title: update.title } : {}),
     ...(Object.hasOwn(update, "className") ? { className: update.className } : {}),
     ...(Object.hasOwn(update, "topic") ? { topic: update.topic } : {}),
     ...(Object.hasOwn(update, "source") ? { source: update.source } : {}),

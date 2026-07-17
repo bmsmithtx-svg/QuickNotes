@@ -13,6 +13,7 @@ import { appendRetrievalFilterSql } from "./retrieval-filters";
 describe("metadata normalization", () => {
   it("trims metadata text, converts empty strings to null, and validates dates", () => {
     const result = parseDocumentMetadataUpdatePayload({
+      title: "  Lecture 7 Notes  ",
       className: "  Data Analytics  ",
       topic: "",
       source: " Course Textbook ",
@@ -23,6 +24,7 @@ describe("metadata normalization", () => {
     assert.equal(result.ok, true);
 
     if (result.ok) {
+      assert.equal(result.value.title, "Lecture 7 Notes");
       assert.equal(result.value.className, "Data Analytics");
       assert.equal(result.value.topic, null);
       assert.equal(result.value.source, "Course Textbook");
@@ -42,6 +44,7 @@ describe("metadata normalization", () => {
   it("rejects invalid metadata update shapes", () => {
     assert.equal(parseDocumentMetadataUpdatePayload({ documentDate: "2026-02-31" }).ok, false);
     assert.equal(parseDocumentMetadataUpdatePayload({ tags: "exam" }).ok, false);
+    assert.equal(parseDocumentMetadataUpdatePayload({ title: "" }).ok, false);
     assert.equal(parseDocumentMetadataUpdatePayload({}).ok, false);
   });
 });

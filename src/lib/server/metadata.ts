@@ -9,6 +9,7 @@ export type NormalizedTag = {
 };
 
 export type DocumentMetadataUpdate = {
+  title?: string;
   className?: string | null;
   topic?: string | null;
   source?: string | null;
@@ -144,6 +145,10 @@ export function parseDocumentMetadataUpdatePayload(payload: unknown): MetadataVa
   const update: DocumentMetadataUpdate = {};
 
   try {
+    if ("title" in body) {
+      update.title = validateRequiredMetadataText(body.title, "title");
+    }
+
     if ("className" in body) {
       update.className = validateMetadataText(body.className, "className");
     }
@@ -296,6 +301,20 @@ function validateMetadataText(value: unknown, fieldName: string) {
   const normalized = normalizeNullableText(value, fieldName);
 
   if (normalized && normalized.length > MAX_METADATA_TEXT_LENGTH) {
+    throw new Error(`${fieldName} must be ${MAX_METADATA_TEXT_LENGTH} characters or fewer.`);
+  }
+
+  return normalized;
+}
+
+function validateRequiredMetadataText(value: unknown, fieldName: string) {
+  const normalized = normalizeNullableText(value, fieldName);
+
+  if (!normalized) {
+    throw new Error(`${fieldName} is required.`);
+  }
+
+  if (normalized.length > MAX_METADATA_TEXT_LENGTH) {
     throw new Error(`${fieldName} must be ${MAX_METADATA_TEXT_LENGTH} characters or fewer.`);
   }
 
