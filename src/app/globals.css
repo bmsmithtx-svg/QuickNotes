@@ -222,6 +222,13 @@ select:-webkit-autofill {
   color: var(--accent-contrast);
 }
 
+.qn-smitty-mark {
+  background-image: url("/smittyai-logo.png");
+  background-position: 19% 50%;
+  background-repeat: no-repeat;
+  background-size: 420% auto;
+}
+
 .qn-workspace-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

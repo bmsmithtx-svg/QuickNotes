@@ -809,13 +809,20 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
     <main className="min-h-screen bg-[var(--background)] px-4 py-5 text-[var(--foreground)] sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-5">
         <header className="flex flex-col gap-4 border-b border-[var(--border)] pb-5 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="flex size-11 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-contrast)]">
               <BookOpen aria-hidden="true" size={22} />
             </div>
-            <div>
-              <h1 className="text-2xl font-semibold tracking-normal">QuickNotes</h1>
-              <p className="text-sm text-[var(--muted)]">Document library</p>
+            <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-1">
+              <div className="min-w-0">
+                <h1 className="text-2xl font-semibold tracking-normal">QuickNotes</h1>
+                <p className="text-sm text-[var(--muted)]">Document library</p>
+              </div>
+              <div className="mt-1 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap leading-none">
+                <span aria-hidden="true" className="qn-smitty-mark size-5 shrink-0 rounded-sm opacity-80" />
+                <span className="text-[0.68rem] font-medium text-[var(--muted)]">Powered by</span>
+                <span className="text-xs font-semibold text-[var(--accent-strong)]">SmittyAI</span>
+              </div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
