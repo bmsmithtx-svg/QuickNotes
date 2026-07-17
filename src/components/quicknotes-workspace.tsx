@@ -115,11 +115,11 @@ const statusLabels: Record<StudyDocumentUploadStatus, string> = {
 };
 
 const statusStyles: Record<StudyDocumentUploadStatus, string> = {
-  UPLOADING: "bg-[#eef3f8] text-[var(--accent-strong)]",
-  PROCESSING: "bg-[#fff4d7] text-[var(--warning)]",
-  READY: "bg-[#e8f4ee] text-[var(--success)]",
-  FAILED: "bg-[#fde8e8] text-[#9b1c1c]",
-  DELETING: "bg-[#f3f4f6] text-[var(--muted)]"
+  UPLOADING: "qn-status-uploading",
+  PROCESSING: "qn-status-processing",
+  READY: "qn-status-ready",
+  FAILED: "qn-status-failed",
+  DELETING: "qn-status-deleting"
 };
 
 const searchModeOptions: Array<{ mode: RetrievalMode; label: string }> = [
@@ -127,6 +127,11 @@ const searchModeOptions: Array<{ mode: RetrievalMode; label: string }> = [
   { mode: "semantic", label: "Semantic" },
   { mode: "keyword", label: "Keyword" }
 ];
+
+const textInputClass = "qn-field h-10 rounded-md px-3 text-sm outline-none";
+const textAreaClass = "qn-field min-h-24 rounded-md px-3 py-2 text-sm leading-6 outline-none";
+const fileInputClass =
+  "block w-full text-sm text-[var(--muted)] file:mr-3 file:h-10 file:rounded-md file:border-0 file:bg-[var(--accent)] file:px-3 file:text-sm file:font-semibold file:text-[var(--accent-contrast)] hover:file:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60";
 
 export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null }) {
   const router = useRouter();
@@ -632,7 +637,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
       <div className="mx-auto flex max-w-7xl flex-col gap-5">
         <header className="flex flex-col gap-4 border-b border-[var(--border)] pb-5 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-md bg-[var(--accent-strong)] text-white">
+            <div className="flex size-11 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-contrast)]">
               <BookOpen aria-hidden="true" size={22} />
             </div>
             <div>
@@ -645,7 +650,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
             <button
               type="button"
               onClick={() => loadDocuments().catch(() => setUploadError("Could not refresh documents."))}
-              className="inline-flex h-10 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 text-sm font-medium text-[var(--foreground)]"
+              className="qn-secondary-button inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium"
               title="Refresh documents"
             >
               <RefreshCw aria-hidden="true" size={16} />
@@ -653,7 +658,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
             </button>
             <a
               href="/api/health"
-              className="inline-flex h-10 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 text-sm font-medium text-[var(--foreground)]"
+              className="qn-secondary-button inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium"
             >
               <Database aria-hidden="true" size={16} />
               API status
@@ -663,7 +668,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
               onClick={() => {
                 void handleSignOut();
               }}
-              className="inline-flex h-10 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 text-sm font-medium text-[var(--foreground)]"
+              className="qn-secondary-button inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium"
               title="Sign out"
             >
               <LogOut aria-hidden="true" size={16} />
@@ -674,7 +679,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
 
         <section className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
           <aside className="flex flex-col gap-4">
-            <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+            <section className="qn-panel rounded-md">
               <div className="border-b border-[var(--border)] p-4">
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Upload</h2>
@@ -687,14 +692,14 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                   name="file"
                   type="file"
                   accept="application/pdf"
-                  className="block w-full text-sm file:mr-3 file:h-10 file:rounded-md file:border-0 file:bg-[var(--accent)] file:px-3 file:text-sm file:font-semibold file:text-white"
+                  className={fileInputClass}
                   disabled={isUploading}
                 />
                 <input
                   name="title"
                   type="text"
                   placeholder="Title"
-                  className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                  className={textInputClass}
                   disabled={isUploading}
                 />
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
@@ -702,14 +707,14 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     name="className"
                     type="text"
                     placeholder="Class"
-                    className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                    className={textInputClass}
                     disabled={isUploading}
                   />
                   <input
                     name="topic"
                     type="text"
                     placeholder="Topic"
-                    className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                    className={textInputClass}
                     disabled={isUploading}
                   />
                 </div>
@@ -717,13 +722,13 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                   name="source"
                   type="text"
                   placeholder="Source"
-                  className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                  className={textInputClass}
                   disabled={isUploading}
                 />
                 <input
                   name="documentDate"
                   type="date"
-                  className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                  className={textInputClass}
                   disabled={isUploading}
                   aria-label="Document date"
                 />
@@ -731,12 +736,12 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                   name="tags"
                   type="text"
                   placeholder="Tags"
-                  className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                  className={textInputClass}
                   disabled={isUploading}
                 />
                 <button
                   type="submit"
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[var(--foreground)] px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  className="qn-primary-button inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={isUploading}
                   title="Upload PDF"
                 >
@@ -744,13 +749,13 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                   Upload PDF
                 </button>
                 {uploadMessage ? (
-                  <p className="flex items-center gap-2 text-sm text-[var(--success)]">
+                  <p className="qn-state-success flex items-center gap-2 text-sm">
                     <CheckCircle2 aria-hidden="true" size={16} />
                     {uploadMessage}
                   </p>
                 ) : null}
                 {uploadError ? (
-                  <p className="flex items-center gap-2 text-sm text-[#9b1c1c]">
+                  <p className="qn-state-error flex items-center gap-2 rounded-md px-3 py-2 text-sm">
                     <AlertCircle aria-hidden="true" size={16} />
                     {uploadError}
                   </p>
@@ -758,7 +763,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
               </form>
             </section>
 
-            <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+            <section className="qn-panel rounded-md">
               <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
                 <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Filters</h2>
                 <Filter aria-hidden="true" size={18} className="text-[var(--accent)]" />
@@ -772,25 +777,23 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                 onClear={() => setFilters(emptyFilters)}
               />
               {metadataOptionsError ? (
-                <p className="border-t border-[var(--border)] p-4 text-sm text-[#9b1c1c]">{metadataOptionsError}</p>
+                <p className="qn-state-error m-4 rounded-md px-3 py-2 text-sm">{metadataOptionsError}</p>
               ) : null}
             </section>
 
-            <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+            <section className="qn-panel rounded-md">
               <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
                 <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Search</h2>
                 <Search aria-hidden="true" size={18} className="text-[var(--accent)]" />
               </div>
               <form onSubmit={handleSearch} className="flex flex-col gap-3 p-4">
-                <div className="grid grid-cols-3 rounded-md border border-[var(--border)] bg-white p-1" role="radiogroup" aria-label="Search mode">
+                <div className="qn-segmented grid grid-cols-3 rounded-md p-1" role="radiogroup" aria-label="Search mode">
                   {searchModeOptions.map((option) => (
                     <button
                       key={option.mode}
                       type="button"
                       onClick={() => setSearchMode(option.mode)}
-                      className={`h-8 rounded-sm text-xs font-semibold ${
-                        searchMode === option.mode ? "bg-[var(--foreground)] text-white" : "text-[var(--muted)]"
-                      }`}
+                      className={`qn-segment h-8 rounded-sm text-xs font-semibold ${searchMode === option.mode ? "qn-segment-active" : ""}`}
                       aria-pressed={searchMode === option.mode}
                     >
                       {option.label}
@@ -803,12 +806,12 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     onChange={(event) => setSearchQuery(event.target.value)}
                     type="search"
                     placeholder="Find text in chunks"
-                    className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                    className={`${textInputClass} min-w-0 flex-1`}
                     disabled={isSearching}
                   />
                   <button
                     type="submit"
-                    className="inline-flex size-10 shrink-0 items-center justify-center rounded-md bg-[var(--foreground)] text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    className="qn-primary-button inline-flex size-10 shrink-0 items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={isSearching}
                     title="Search chunks"
                   >
@@ -823,7 +826,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                 </div>
               ) : null}
               {searchError ? (
-                <p className="border-t border-[var(--border)] p-4 text-sm text-[#9b1c1c]">{searchError}</p>
+                <p className="qn-state-error m-4 rounded-md px-3 py-2 text-sm">{searchError}</p>
               ) : null}
               <div className="divide-y divide-[var(--border)]">
                 {!isSearching && searchQuery.trim() && searchResults.length === 0 && !searchError ? (
@@ -836,8 +839,8 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     key={result.chunkId}
                     type="button"
                     onClick={() => selectSearchResult(result)}
-                    className={`block w-full px-4 py-3 text-left transition ${
-                      result.chunkId === selectedSearchResult?.chunkId ? "bg-[var(--panel-strong)]" : "bg-white hover:bg-[var(--panel-strong)]"
+                    className={`qn-row block w-full px-4 py-3 text-left ${
+                      result.chunkId === selectedSearchResult?.chunkId ? "qn-row-selected" : ""
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3 text-xs font-semibold text-[var(--muted)]">
@@ -846,7 +849,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold text-[var(--muted)]">
                       {formatRankingBadges(result).map((badge) => (
-                        <span key={badge} className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">
+                        <span key={badge} className="qn-chip rounded-sm px-2 py-1">
                           {badge}
                         </span>
                       ))}
@@ -859,7 +862,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
               </div>
             </section>
 
-            <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+            <section className="qn-panel rounded-md">
               <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
                 <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Documents</h2>
                 <FileText aria-hidden="true" size={18} className="text-[var(--accent)]" />
@@ -882,9 +885,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                       setSelectedDocumentId(document.id);
                       setSelectedSearchResult(null);
                     }}
-                    className={`block w-full px-4 py-3 text-left transition ${
-                      document.id === selectedDocumentId ? "bg-[var(--panel-strong)]" : "bg-white hover:bg-[var(--panel-strong)]"
-                    }`}
+                    className={`qn-row block w-full px-4 py-3 text-left ${document.id === selectedDocumentId ? "qn-row-selected" : ""}`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -905,7 +906,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
           </aside>
 
           <div className="flex flex-col gap-4">
-          <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+          <section className="qn-panel rounded-md">
             <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Ask QuickNotes</h2>
@@ -914,15 +915,13 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
             </div>
             <form onSubmit={handleAnswer} className="flex flex-col gap-3 p-4">
               <div className="grid gap-3">
-                <div className="grid grid-cols-3 rounded-md border border-[var(--border)] bg-white p-1" role="radiogroup" aria-label="Answer retrieval mode">
+                <div className="qn-segmented grid grid-cols-3 rounded-md p-1" role="radiogroup" aria-label="Answer retrieval mode">
                   {searchModeOptions.map((option) => (
                     <button
                       key={option.mode}
                       type="button"
                       onClick={() => setAnswerMode(option.mode)}
-                      className={`h-9 rounded-sm text-xs font-semibold ${
-                        answerMode === option.mode ? "bg-[var(--foreground)] text-white" : "text-[var(--muted)]"
-                      }`}
+                      className={`qn-segment h-9 rounded-sm text-xs font-semibold ${answerMode === option.mode ? "qn-segment-active" : ""}`}
                       aria-pressed={answerMode === option.mode}
                       disabled={isAnswering}
                     >
@@ -937,12 +936,12 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                   value={answerQuestion}
                   onChange={(event) => setAnswerQuestion(event.target.value)}
                   placeholder="Ask a question about your documents"
-                  className="min-h-24 min-w-0 flex-1 rounded-md border border-[var(--border)] bg-white px-3 py-2 text-sm leading-6 outline-none ring-[var(--accent)] focus:ring-2"
+                  className={`${textAreaClass} min-w-0 flex-1`}
                   disabled={isAnswering}
                 />
                 <button
                   type="submit"
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[var(--foreground)] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 md:self-start"
+                  className="qn-primary-button inline-flex h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60 md:self-start"
                   disabled={isAnswering}
                   title="Ask QuickNotes"
                 >
@@ -956,7 +955,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
               </div>
             </form>
             {answerError ? (
-              <p className="border-t border-[var(--border)] p-4 text-sm text-[#9b1c1c]">{answerError}</p>
+              <p className="qn-state-error m-4 rounded-md px-3 py-2 text-sm">{answerError}</p>
             ) : null}
             {isAnswering ? (
               <div className="flex items-center gap-2 border-t border-[var(--border)] p-4 text-sm text-[var(--muted)]">
@@ -973,7 +972,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                 </div>
                 <ActiveScope filters={answerResponse.filters} documents={documents} />
                 {answerResponse.status === "insufficient_evidence" ? (
-                  <p className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-sm leading-6">
+                  <p className="qn-state-warning rounded-md p-3 text-sm leading-6">
                     {hasAppliedFilters(answerResponse.filters)
                       ? `${answerResponse.answer} The selected filters may be too restrictive.`
                       : answerResponse.answer}
@@ -994,8 +993,8 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                         onClick={() => setSelectedCitationId(citation.id)}
                         className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs font-semibold ${
                           selectedCitationId === citation.id
-                            ? "border-[var(--foreground)] bg-[var(--foreground)] text-white"
-                            : "border-[var(--border)] bg-white text-[var(--foreground)]"
+                            ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-contrast)]"
+                            : "qn-secondary-button"
                         }`}
                       >
                         <Quote aria-hidden="true" size={14} />
@@ -1009,7 +1008,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
             ) : null}
           </section>
 
-          <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+          <section className="qn-panel rounded-md">
             <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 md:flex-row md:items-center md:justify-between">
               <div className="min-w-0">
                 <h2 className="truncate text-lg font-semibold">{selectedDocument?.title ?? "Extracted chunks"}</h2>
@@ -1021,7 +1020,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     href={`/api/documents/${selectedDocument.id}/source`}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 text-xs font-semibold text-[var(--foreground)]"
+                    className="qn-secondary-button inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-semibold"
                     title="Open source PDF"
                   >
                     <ExternalLink aria-hidden="true" size={14} />
@@ -1031,7 +1030,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     <button
                       type="button"
                       onClick={() => handleRetryDocument(selectedDocument)}
-                      className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 text-xs font-semibold text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="qn-secondary-button inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={documentActionId === selectedDocument.id}
                       title="Retry document processing"
                     >
@@ -1046,7 +1045,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                   <button
                     type="button"
                     onClick={() => handleDeleteDocument(selectedDocument)}
-                    className="inline-flex h-9 items-center gap-2 rounded-md border border-[#f2caca] bg-white px-3 text-xs font-semibold text-[#9b1c1c] disabled:cursor-not-allowed disabled:opacity-60"
+                    className="qn-danger-button inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={documentActionId === selectedDocument.id || selectedDocument.uploadStatus === "DELETING"}
                     title="Delete document"
                   >
@@ -1066,13 +1065,13 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
               <article className="border-b border-[var(--border)] bg-[var(--panel-strong)] p-4">
                 <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
                   <span>Selected search result</span>
-                  <span className="rounded-sm bg-white px-2 py-1">Page {selectedSearchResult.pageNumber}</span>
-                  <span className="rounded-sm bg-white px-2 py-1">Chunk {selectedSearchResult.chunkIndex}</span>
+                  <span className="qn-chip-strong rounded-sm px-2 py-1">Page {selectedSearchResult.pageNumber}</span>
+                  <span className="qn-chip-strong rounded-sm px-2 py-1">Chunk {selectedSearchResult.chunkIndex}</span>
                   <span>{formatPrimaryRanking(selectedSearchResult)}</span>
                 </div>
                 <div className="mb-3 flex flex-wrap gap-2 text-[11px] font-semibold text-[var(--muted)]">
                   {formatRankingBadges(selectedSearchResult).map((badge) => (
-                    <span key={badge} className="rounded-sm bg-white px-2 py-1">
+                    <span key={badge} className="qn-chip-strong rounded-sm px-2 py-1">
                       {badge}
                     </span>
                   ))}
@@ -1112,7 +1111,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
           </div>
 
           <aside className="flex flex-col gap-4">
-            <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+            <section className="qn-panel rounded-md">
               <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
                 <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Metadata</h2>
                 <Tags aria-hidden="true" size={17} className="text-[var(--accent)]" />
@@ -1128,7 +1127,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     <MetadataItem label="Attempts" value={String(selectedDocument.processingAttemptCount)} />
                   </dl>
                   {selectedDocument.failureReason ? (
-                    <p className="rounded-md border border-[#f2caca] bg-[#fff7f7] p-3 text-xs leading-5 text-[#9b1c1c]">
+                    <p className="qn-state-error rounded-md p-3 text-xs leading-5">
                       {selectedDocument.failureStage ? `${selectedDocument.failureStage}: ` : ""}
                       {selectedDocument.failureReason}
                     </p>
@@ -1138,7 +1137,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     <input
                       value={metadataForm.className}
                       onChange={(event) => setMetadataForm((current) => ({ ...current, className: event.target.value }))}
-                      className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                      className={textInputClass}
                       disabled={metadataSaveState === "saving"}
                     />
                   </label>
@@ -1147,7 +1146,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     <input
                       value={metadataForm.topic}
                       onChange={(event) => setMetadataForm((current) => ({ ...current, topic: event.target.value }))}
-                      className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                      className={textInputClass}
                       disabled={metadataSaveState === "saving"}
                     />
                   </label>
@@ -1156,7 +1155,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     <input
                       value={metadataForm.source}
                       onChange={(event) => setMetadataForm((current) => ({ ...current, source: event.target.value }))}
-                      className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                      className={textInputClass}
                       disabled={metadataSaveState === "saving"}
                     />
                   </label>
@@ -1166,7 +1165,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                       value={metadataForm.documentDate}
                       onChange={(event) => setMetadataForm((current) => ({ ...current, documentDate: event.target.value }))}
                       type="date"
-                      className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                      className={textInputClass}
                       disabled={metadataSaveState === "saving"}
                     />
                   </label>
@@ -1175,14 +1174,14 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     <input
                       value={metadataForm.tags}
                       onChange={(event) => setMetadataForm((current) => ({ ...current, tags: event.target.value }))}
-                      className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+                      className={textInputClass}
                       disabled={metadataSaveState === "saving"}
                     />
                   </label>
                   <TagPreview tags={splitTags(metadataForm.tags)} />
                   <button
                     type="submit"
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[var(--foreground)] px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    className="qn-primary-button inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={metadataSaveState === "saving"}
                     title="Save metadata"
                   >
@@ -1190,7 +1189,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     Save metadata
                   </button>
                   {metadataSaveMessage ? (
-                    <p className={`text-sm ${metadataSaveState === "error" ? "text-[#9b1c1c]" : "text-[var(--success)]"}`}>
+                    <p className={`text-sm ${metadataSaveState === "error" ? "qn-state-error rounded-md px-3 py-2" : "qn-state-success"}`}>
                       {metadataSaveMessage}
                     </p>
                   ) : null}
@@ -1200,7 +1199,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
               )}
             </section>
 
-            <section className="rounded-md border border-[var(--border)] bg-[var(--panel)]">
+            <section className="qn-panel rounded-md">
               <div className="border-b border-[var(--border)] p-4">
                 <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Page Text</h2>
               </div>
@@ -1283,7 +1282,7 @@ function MetadataFilterControls({
             value={filters.documentDateFrom}
             onChange={updateDate("documentDateFrom")}
             type="date"
-            className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm font-normal normal-case text-[var(--foreground)] outline-none ring-[var(--accent)] focus:ring-2"
+            className={`${textInputClass} font-normal normal-case`}
             disabled={disabled}
           />
         </label>
@@ -1293,7 +1292,7 @@ function MetadataFilterControls({
             value={filters.documentDateTo}
             onChange={updateDate("documentDateTo")}
             type="date"
-            className="h-10 rounded-md border border-[var(--border)] bg-white px-3 text-sm font-normal normal-case text-[var(--foreground)] outline-none ring-[var(--accent)] focus:ring-2"
+            className={`${textInputClass} font-normal normal-case`}
             disabled={disabled}
           />
         </label>
@@ -1303,7 +1302,7 @@ function MetadataFilterControls({
         <button
           type="button"
           onClick={onClear}
-          className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 text-xs font-semibold text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="qn-secondary-button inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
           disabled={disabled || !active}
           title="Clear filters"
         >
@@ -1335,7 +1334,7 @@ function FilterSelect({
         multiple
         value={values}
         onChange={onChange}
-        className="min-h-24 rounded-md border border-[var(--border)] bg-white px-2 py-2 text-sm font-normal normal-case text-[var(--foreground)] outline-none ring-[var(--accent)] focus:ring-2"
+        className="qn-field min-h-24 rounded-md px-2 py-2 text-sm font-normal normal-case outline-none"
         disabled={disabled || options.length === 0}
       >
         {options.map((option) => (
@@ -1363,12 +1362,12 @@ function ActiveScope({
     <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
       {chips.length > 0 ? (
         chips.map((chip) => (
-          <span key={chip} className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">
+          <span key={chip} className="qn-chip rounded-sm px-2 py-1">
             {chip}
           </span>
         ))
       ) : (
-        <span className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">{emptyLabel}</span>
+        <span className="qn-chip rounded-sm px-2 py-1">{emptyLabel}</span>
       )}
     </div>
   );
@@ -1379,7 +1378,7 @@ function TagPreview({ tags }: { tags: string[] }) {
     <div className="flex flex-wrap gap-2">
       {tags.length > 0 ? (
         tags.map((tag) => (
-          <span key={tag} className="rounded-sm bg-[var(--panel-strong)] px-2 py-1 text-xs font-medium">
+          <span key={tag} className="qn-chip rounded-sm px-2 py-1 text-xs font-medium">
             {tag}
           </span>
         ))
@@ -1447,7 +1446,7 @@ function AnswerText({
           key={`${citationId}-${markerStart}`}
           type="button"
           onClick={() => onCitationClick(citationId)}
-          className="mx-0.5 rounded-sm bg-[var(--panel-strong)] px-1.5 py-0.5 text-xs font-semibold text-[var(--accent-strong)]"
+          className="mx-0.5 rounded-sm bg-[var(--panel-selected)] px-1.5 py-0.5 text-xs font-semibold text-[var(--accent-strong)] hover:bg-[var(--panel-hover)]"
         >
           {match[0]}
         </button>
@@ -1464,7 +1463,7 @@ function AnswerText({
     parts.push(answer.slice(cursor));
   }
 
-  return <p className="whitespace-pre-wrap rounded-md border border-[var(--border)] bg-white p-3 text-sm leading-6">{parts}</p>;
+  return <p className="whitespace-pre-wrap rounded-md border border-[var(--border)] bg-[var(--control)] p-3 text-sm leading-6">{parts}</p>;
 }
 
 function CitationReveal({ citation }: { citation: AnswerCitation }) {
@@ -1472,9 +1471,9 @@ function CitationReveal({ citation }: { citation: AnswerCitation }) {
     <article className="mt-4 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
         <span>{citation.marker}</span>
-        <span className="rounded-sm bg-white px-2 py-1">{citation.documentTitle}</span>
-        <span className="rounded-sm bg-white px-2 py-1">Page {citation.pageNumber}</span>
-        <span className="rounded-sm bg-white px-2 py-1">Rank {citation.retrievalRank}</span>
+        <span className="qn-chip-strong rounded-sm px-2 py-1">{citation.documentTitle}</span>
+        <span className="qn-chip-strong rounded-sm px-2 py-1">Page {citation.pageNumber}</span>
+        <span className="qn-chip-strong rounded-sm px-2 py-1">Rank {citation.retrievalRank}</span>
         <span>Score {formatScore(citation.retrievalScore)}</span>
       </div>
       <p className="mb-2 truncate text-xs text-[var(--muted)]">{citation.documentFileName}</p>
@@ -1624,7 +1623,7 @@ function formatRankingBadges(result: ChunkSearchResult) {
 }
 
 function StatusBadge({ status }: { status: StudyDocumentUploadStatus }) {
-  return <span className={`shrink-0 rounded-sm px-2 py-1 text-xs font-semibold ${statusStyles[status]}`}>{statusLabels[status]}</span>;
+  return <span className={`qn-status-badge shrink-0 rounded-sm px-2 py-1 text-xs font-semibold ${statusStyles[status]}`}>{statusLabels[status]}</span>;
 }
 
 function MetadataItem({ label, value }: { label: string; value: string }) {

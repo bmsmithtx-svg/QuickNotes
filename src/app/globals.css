@@ -1,16 +1,34 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f7f8f4;
-  --foreground: #161616;
-  --muted: #6b6f76;
-  --panel: #ffffff;
-  --panel-strong: #f0f4f8;
-  --border: #d8dde3;
-  --accent: #175c8a;
-  --accent-strong: #0e3d5f;
-  --success: #2f6f4e;
-  --warning: #946200;
+  --background: #090b10;
+  --foreground: #f4f6fa;
+  --muted: #a7afbf;
+  --subtle: #747d90;
+  --panel: #11141b;
+  --panel-strong: #171b24;
+  --panel-hover: #1d2430;
+  --panel-selected: #202838;
+  --control: #0f131b;
+  --control-hover: #151b25;
+  --control-disabled: #10141b;
+  --border: #272c38;
+  --border-strong: #3a4252;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-strong: #93c5fd;
+  --accent-contrast: #f8fbff;
+  --focus-ring: rgb(59 130 246 / 0.35);
+  --success: #86efac;
+  --success-surface: rgb(34 197 94 / 0.14);
+  --success-border: rgb(34 197 94 / 0.32);
+  --warning: #fbbf24;
+  --warning-surface: rgb(245 158 11 / 0.15);
+  --warning-border: rgb(245 158 11 / 0.34);
+  --error: #f87171;
+  --error-surface: rgb(239 68 68 / 0.14);
+  --error-border: rgb(239 68 68 / 0.34);
+  --shadow-soft: 0 18px 50px rgb(0 0 0 / 0.28);
 }
 
 * {
@@ -19,6 +37,8 @@
 
 html {
   background: var(--background);
+  color-scheme: dark;
+  accent-color: var(--accent);
 }
 
 body {
@@ -35,10 +55,246 @@ button,
 input,
 textarea,
 select {
+  color: inherit;
   font: inherit;
 }
 
+button,
+select,
+input[type="file"] {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
+input,
+textarea,
+select {
+  color-scheme: dark;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--subtle);
+  opacity: 1;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  box-shadow: 0 0 0 1000px var(--control) inset;
+  -webkit-text-fill-color: var(--foreground);
+  caret-color: var(--foreground);
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
 ::selection {
-  background: #cce3f3;
+  background: rgb(59 130 246 / 0.35);
   color: var(--foreground);
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid var(--background);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--subtle);
+}
+
+.qn-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+}
+
+.qn-field {
+  background: var(--control);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.qn-field:hover {
+  background: var(--control-hover);
+  border-color: var(--border-strong);
+}
+
+.qn-field:focus,
+.qn-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  outline: none;
+}
+
+.qn-field:disabled,
+.qn-field:has(:disabled) {
+  background: var(--control-disabled);
+  color: var(--subtle);
+  opacity: 0.72;
+}
+
+.qn-primary-button,
+.qn-secondary-button,
+.qn-danger-button {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+}
+
+.qn-primary-button {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.qn-primary-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.qn-secondary-button {
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+}
+
+.qn-secondary-button:hover:not(:disabled) {
+  background: var(--panel-hover);
+  border-color: var(--border-strong);
+}
+
+.qn-danger-button {
+  background: var(--error-surface);
+  border: 1px solid var(--error-border);
+  color: var(--error);
+}
+
+.qn-danger-button:hover:not(:disabled) {
+  background: rgb(239 68 68 / 0.2);
+  border-color: var(--error);
+}
+
+.qn-segmented {
+  background: var(--control);
+  border: 1px solid var(--border);
+}
+
+.qn-segment {
+  color: var(--muted);
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.qn-segment:hover:not(:disabled) {
+  background: var(--panel-hover);
+  color: var(--foreground);
+}
+
+.qn-segment-active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.qn-row {
+  background: transparent;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.qn-row:hover {
+  background: var(--panel-hover);
+}
+
+.qn-row-selected {
+  background: var(--panel-selected);
+}
+
+.qn-chip {
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.qn-chip-strong {
+  background: var(--panel-selected);
+  border: 1px solid var(--border-strong);
+  color: var(--foreground);
+}
+
+.qn-state-success {
+  color: var(--success);
+}
+
+.qn-state-warning {
+  background: var(--warning-surface);
+  border: 1px solid var(--warning-border);
+  color: var(--warning);
+}
+
+.qn-state-error {
+  background: var(--error-surface);
+  border: 1px solid var(--error-border);
+  color: var(--error);
+}
+
+.qn-status-badge {
+  border: 1px solid transparent;
+}
+
+.qn-status-uploading {
+  background: rgb(59 130 246 / 0.16);
+  border-color: rgb(59 130 246 / 0.32);
+  color: var(--accent-strong);
+}
+
+.qn-status-processing {
+  background: var(--warning-surface);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
+
+.qn-status-ready {
+  background: var(--success-surface);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.qn-status-failed {
+  background: var(--error-surface);
+  border-color: var(--error-border);
+  color: var(--error);
+}
+
+.qn-status-deleting {
+  background: var(--panel-strong);
+  border-color: var(--border);
+  color: var(--muted);
 }
