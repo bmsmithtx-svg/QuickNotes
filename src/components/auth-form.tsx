@@ -52,16 +52,19 @@ export function AuthForm({ reason }: { reason?: string | null }) {
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-md items-center">
         <section className="qn-panel w-full rounded-md">
           <div className="border-b border-[var(--border)] p-5">
-            <div className="flex flex-col gap-2">
-              <h1 className="text-2xl font-semibold tracking-normal">QuickNotes</h1>
-              <p className="text-xs font-semibold uppercase tracking-normal text-[var(--muted)]">Powered by</p>
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <h1 className="shrink-0 text-xl font-semibold tracking-normal sm:text-2xl">QuickNotes</h1>
+              <span aria-hidden="true" className="h-5 w-px shrink-0 bg-[var(--border-strong)]" />
+              <p className="shrink-0 text-[0.6rem] font-semibold uppercase tracking-normal text-[var(--muted)] sm:text-xs">
+                Powered by
+              </p>
               <Image
                 src="/smittyai-logo.png"
                 alt="SmittyAI"
-                width={240}
-                height={160}
+                width={120}
+                height={80}
                 priority
-                className="h-auto w-full max-w-60 rounded-sm object-contain"
+                className="h-6 w-auto max-w-[4.5rem] shrink-0 rounded-sm object-contain sm:h-8 sm:max-w-[5.5rem]"
               />
             </div>
             <p className="mt-1 text-sm text-[var(--muted)]">{mode === "sign-in" ? "Sign in to continue." : "Create an account."}</p>
