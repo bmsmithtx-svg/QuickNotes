@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth-form";
-import { isAuthenticationError, requireAuthenticatedUser } from "@/lib/server/auth";
+import { requireAuthenticatedUser } from "@/lib/server/auth";
+import { shouldRedirectAuthenticatedVisitor } from "@/lib/server/auth-routing";
 
 export const dynamic = "force-dynamic";
 
@@ -12,13 +13,8 @@ type AuthPageProps = {
 };
 
 export default async function AuthPage({ searchParams }: AuthPageProps) {
-  try {
-    await requireAuthenticatedUser();
+  if (await shouldRedirectAuthenticatedVisitor(requireAuthenticatedUser)) {
     redirect("/");
-  } catch (error) {
-    if (!isAuthenticationError(error)) {
-      throw error;
-    }
   }
 
   const params = await searchParams;

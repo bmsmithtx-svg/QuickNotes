@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { getSupabaseBrowserConfig } from "@/lib/supabase/config";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
+import { createTimeoutFetch } from "@/lib/supabase/timeout-fetch";
 
 export type AuthenticatedUser = {
   id: string;
@@ -94,6 +95,9 @@ function createTokenVerifierClient() {
       autoRefreshToken: false,
       detectSessionInUrl: false,
       persistSession: false
+    },
+    global: {
+      fetch: createTimeoutFetch()
     }
   });
 }

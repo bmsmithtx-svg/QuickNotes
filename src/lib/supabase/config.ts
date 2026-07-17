@@ -3,12 +3,28 @@ export type SupabaseBrowserConfig = {
   publishableKey: string;
 };
 
-export function getSupabaseBrowserConfig(env: NodeJS.ProcessEnv = process.env): SupabaseBrowserConfig {
-  const url = requireEnv(env, "NEXT_PUBLIC_SUPABASE_URL");
-  const publishableKey = requireEnv(env, "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+export class SupabaseConfigurationError extends Error {
+  constructor(
+    readonly variableName: string,
+    message = `${variableName} must be configured for Supabase authentication.`
+  ) {
+    super(message);
+    this.name = "SupabaseConfigurationError";
+  }
+}
 
-  if (env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY?.trim()) {
-    throw new Error("Do not expose the Supabase service-role key through NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY.");
+export function getSupabaseBrowserConfig(env?: NodeJS.ProcessEnv): SupabaseBrowserConfig {
+  const url = requireEnvValue("NEXT_PUBLIC_SUPABASE_URL", env?.NEXT_PUBLIC_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const publishableKey = requireEnvValue(
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    env?.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  );
+
+  if ((env?.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY)?.trim()) {
+    throw new SupabaseConfigurationError(
+      "NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY",
+      "Do not expose the Supabase service-role key through NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY."
+    );
   }
 
   return {
@@ -17,16 +33,28 @@ export function getSupabaseBrowserConfig(env: NodeJS.ProcessEnv = process.env): 
   };
 }
 
-function requireEnv(env: NodeJS.ProcessEnv, name: string) {
-  const value = env[name]?.trim();
+export function isSupabaseConfigurationError(error: unknown) {
+  if (error instanceof SupabaseConfigurationError) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.name === "SupabaseConfigurationError" || error.message.includes("NEXT_PUBLIC_SUPABASE");
+}
+
+function requireEnvValue(name: string, rawValue: string | undefined) {
+  const value = rawValue?.trim();
 
   if (!value) {
-    throw new Error(`${name} must be configured for Supabase authentication.`);
+    throw new SupabaseConfigurationError(name);
   }
 
   return value;
 }
 
-function normalizeSupabaseUrl(value: string) {
+export function normalizeSupabaseUrl(value: string) {
   return value.replace(/\/+$/, "");
 }

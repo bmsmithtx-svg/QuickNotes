@@ -32,7 +32,7 @@ import {
   type ReactNode
 } from "react";
 
-import { createClient } from "@/lib/supabase/client";
+import { createClientAsync } from "@/lib/supabase/client";
 import type {
   AppliedRetrievalFilters,
   AnswerCitation,
@@ -193,9 +193,13 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
   );
 
   async function handleSignOut() {
-    await createClient().auth.signOut();
-    router.replace("/auth");
-    router.refresh();
+    try {
+      const supabase = await createClientAsync();
+      await supabase.auth.signOut();
+    } finally {
+      router.replace("/auth");
+      router.refresh();
+    }
   }
 
   const loadDocuments = useCallback(async (nextSelectedId?: string) => {
