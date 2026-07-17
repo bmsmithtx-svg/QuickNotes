@@ -1,7 +1,7 @@
 import type { ChunkSearchResult, RetrievalMode } from "../types";
 import { parseTags } from "./document-mappers";
 import type { PrismaTransactionLike } from "./db";
-import { appendRetrievalFilterSql, getAppliedRetrievalFilters, tagJsonSelect } from "./retrieval-filters";
+import { appendOwnerFilterSql, appendRetrievalFilterSql, getAppliedRetrievalFilters, tagJsonSelect } from "./retrieval-filters";
 import { addSqlParameter } from "./sql";
 import { serializeVectorForPgvector } from "./vector-utils";
 import {
@@ -203,6 +203,7 @@ async function getStoredSemanticRows(
   filters.push(`embedding."embeddingModel" = ${modelParameter}`);
   filters.push(`embedding."dimensions" = ${dimensionsParameter}`);
   filters.push(`document."uploadStatus" = 'READY'`);
+  appendOwnerFilterSql(filters, parameters, input.ownerId);
   appendRetrievalFilterSql(filters, parameters, appliedFilters);
   const limitParameter = addSqlParameter(parameters, clampSearchLimit(input.limit));
 

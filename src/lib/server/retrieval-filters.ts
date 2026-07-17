@@ -60,10 +60,25 @@ export function appendRetrievalFilterSql(
         `SELECT 1 FROM "DocumentTag" AS "${tagLinkAlias}" ` +
         `INNER JOIN "Tag" AS "${tagAlias}" ON "${tagAlias}"."id" = "${tagLinkAlias}"."tagId" ` +
         `WHERE "${tagLinkAlias}"."documentId" = ${qualifiedDocument}."id" ` +
+        `AND "${tagAlias}"."ownerId" = ${qualifiedDocument}."ownerId" ` +
         `AND "${tagAlias}"."normalizedName" IN (${placeholders})` +
         `)`
     );
   }
+}
+
+export function appendOwnerFilterSql(
+  filters: string[],
+  parameters: unknown[],
+  ownerId: string | undefined,
+  options: Pick<RetrievalFilterSqlOptions, "documentAlias"> = {}
+) {
+  if (!ownerId?.trim()) {
+    return;
+  }
+
+  const documentAlias = options.documentAlias ?? "document";
+  filters.push(`"${documentAlias}"."ownerId" = ${addSqlParameter(parameters, ownerId.trim())}::uuid`);
 }
 
 export function tagJsonSelect(documentAlias = "document") {
@@ -77,6 +92,7 @@ export function tagJsonSelect(documentAlias = "document") {
             INNER JOIN "Tag" AS "tag"
               ON "tag"."id" = "documentTag"."tagId"
             WHERE "documentTag"."documentId" = ${qualifiedDocument}."id"
+              AND "tag"."ownerId" = ${qualifiedDocument}."ownerId"
           ) AS "orderedTags"
         ), ${qualifiedDocument}."tags")`;
 }

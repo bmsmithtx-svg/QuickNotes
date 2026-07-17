@@ -32,6 +32,7 @@ export type DocumentLifecycleStage =
 
 export type StoredDocumentRecord = {
   id: string;
+  ownerId: string;
   originalFileName: string;
   storedFileName: string;
   fileSize: number;
@@ -63,6 +64,7 @@ type ProcessStoredDocumentInput = {
   prisma?: PrismaClientLike;
   storage?: DocumentStorageAdapter;
   documentId: string;
+  ownerId?: string;
   tags?: NormalizedTag[];
   extractPdf?: typeof extractPdfTextByPage;
   embeddingConfig?: EmbeddingRuntimeConfig;
@@ -72,6 +74,7 @@ type DeleteStoredDocumentInput = {
   prisma?: PrismaClientLike;
   storage?: DocumentStorageAdapter;
   documentId: string;
+  ownerId?: string;
 };
 
 export class DocumentLifecycleError extends Error {
@@ -110,7 +113,7 @@ export function isDocumentReady(status: string) {
 
 export async function deleteStoredDocument(input: DeleteStoredDocumentInput): Promise<DocumentDeletionResult> {
   const prisma = input.prisma ?? (await getPrisma());
-  const document = await findStoredDocument(prisma, input.documentId);
+  const document = await findStoredDocument(prisma, input.documentId, input.ownerId);
 
   if (!document) {
     return {
@@ -179,7 +182,7 @@ export async function deleteStoredDocument(input: DeleteStoredDocumentInput): Pr
 export async function processStoredDocument(input: ProcessStoredDocumentInput): Promise<DocumentProcessingResult> {
   const prisma = input.prisma ?? (await getPrisma());
   const extractPdf = input.extractPdf ?? extractPdfTextByPage;
-  const document = await findStoredDocument(prisma, input.documentId);
+  const document = await findStoredDocument(prisma, input.documentId, input.ownerId);
 
   if (!document) {
     throw new DocumentLifecycleError("processing", "Document not found.");
@@ -236,6 +239,7 @@ export async function processStoredDocument(input: ProcessStoredDocumentInput): 
         await replaceDocumentTags(
           transaction as unknown as MetadataTagTransaction,
           document.id,
+          document.ownerId,
           input.tags ?? parseStoredTags(document.tags)
         );
 
@@ -376,13 +380,19 @@ export function sanitizeFailureMessage(error: unknown) {
   return message.replace(/[A-Za-z0-9_-]{48,}/g, "[redacted]").slice(0, 500);
 }
 
-async function findStoredDocument(prisma: PrismaClientLike, documentId: string) {
-  return (await prisma.studyDocument.findUnique({
-    where: {
-      id: documentId
-    },
+async function findStoredDocument(prisma: PrismaClientLike, documentId: string, ownerId?: string) {
+  const args = {
+    where: ownerId
+      ? {
+          id: documentId,
+          ownerId
+        }
+      : {
+          id: documentId
+        },
     select: {
       id: true,
+      ownerId: true,
       originalFileName: true,
       storedFileName: true,
       fileSize: true,
@@ -394,7 +404,13 @@ async function findStoredDocument(prisma: PrismaClientLike, documentId: string) 
       storageObjectKey: true,
       contentSha256: true
     }
-  })) as StoredDocumentRecord | null;
+  };
+
+  if (ownerId) {
+    return (await prisma.studyDocument.findFirst?.(args)) as StoredDocumentRecord | null;
+  }
+
+  return (await prisma.studyDocument.findUnique(args)) as StoredDocumentRecord | null;
 }
 
 async function syncUploadedDocumentEmbeddings(

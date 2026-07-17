@@ -176,6 +176,67 @@ describe("document storage adapters", () => {
     }
   });
 
+  it("recursively lists Supabase owner-scoped PDFs without reporting folder prefixes as objects", async () => {
+    const prefixes: string[] = [];
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { prefix?: string };
+      const prefix = body.prefix ?? "";
+
+      prefixes.push(prefix);
+
+      const items =
+        prefix === ""
+          ? [{ name: "owner-id", id: null, metadata: null }]
+          : prefix === "owner-id"
+            ? [{ name: "document-id", id: null, metadata: null }]
+            : prefix === "owner-id/document-id"
+              ? [
+                  {
+                    id: "object-id",
+                    name: "source.pdf",
+                    updated_at: "2026-07-16T00:00:00.000Z",
+                    metadata: {
+                      size: 12,
+                      mimetype: "application/pdf"
+                    }
+                  }
+                ]
+              : [];
+
+      return new Response(JSON.stringify(items), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+    }) as typeof fetch;
+
+    try {
+      const storage = createDocumentStorage({
+        provider: "supabase",
+        bucket: "private",
+        supabaseUrl: "https://example.supabase.co",
+        serviceRoleKey: "service-role-secret"
+      });
+
+      const listed = await storage.listObjects({ prefix: "" });
+
+      assert.deepEqual(prefixes, ["", "owner-id", "owner-id/document-id"]);
+      assert.deepEqual(listed, [
+        {
+          key: "owner-id/document-id/source.pdf",
+          size: 12,
+          contentType: "application/pdf",
+          updatedAt: "2026-07-16T00:00:00.000Z"
+        }
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("checks Supabase object existence with a ranged GET probe", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const originalFetch = globalThis.fetch;
@@ -300,12 +361,12 @@ describe("document storage adapters", () => {
     }
   });
 
-  it("uses collision-resistant object keys that do not depend on the original filename", () => {
-    const left = createPdfObjectKey();
-    const right = createPdfObjectKey();
+  it("uses deterministic owner-scoped object keys that do not depend on the original filename", () => {
+    const left = createPdfObjectKey("11111111-1111-4111-8111-111111111111", "doc_1");
+    const right = createPdfObjectKey("22222222-2222-4222-8222-222222222222", "doc_1");
 
-    assert.match(left, /^documents\/[0-9a-f-]{36}\.pdf$/);
-    assert.match(right, /^documents\/[0-9a-f-]{36}\.pdf$/);
+    assert.equal(left, "11111111-1111-4111-8111-111111111111/doc_1/source.pdf");
+    assert.equal(right, "22222222-2222-4222-8222-222222222222/doc_1/source.pdf");
     assert.notEqual(left, right);
   });
 });

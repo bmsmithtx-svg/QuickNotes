@@ -236,10 +236,15 @@ export function serializeNormalizedTags(tags: NormalizedTag[]) {
 export async function replaceDocumentTags(
   transaction: MetadataTagTransaction,
   documentId: string,
+  ownerId: string,
   tags: NormalizedTag[]
 ) {
   if (!documentId.trim()) {
     throw new Error("documentId is required before replacing document tags.");
+  }
+
+  if (!ownerId.trim()) {
+    throw new Error("ownerId is required before replacing document tags.");
   }
 
   await transaction.documentTag.deleteMany({
@@ -251,12 +256,16 @@ export async function replaceDocumentTags(
   for (const tag of tags) {
     const storedTag = (await transaction.tag.upsert({
       where: {
-        normalizedName: tag.normalizedName
+        ownerId_normalizedName: {
+          ownerId,
+          normalizedName: tag.normalizedName
+        }
       },
       update: {
         name: tag.name
       },
       create: {
+        ownerId,
         name: tag.name,
         normalizedName: tag.normalizedName
       }

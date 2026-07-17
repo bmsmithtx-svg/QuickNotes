@@ -1,7 +1,7 @@
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
-import { NextResponse } from "next/server";
-
+import { getAuthenticatedUserOrUnauthorized, privateJson } from "@/lib/server/auth";
 import {
   DOCUMENT_UPLOAD_STATUS,
   DocumentLifecycleError,
@@ -29,6 +29,12 @@ const LOCAL_MAX_PDF_UPLOAD_BYTES = 25 * 1024 * 1024;
 const VERCEL_SAFE_MAX_PDF_UPLOAD_BYTES = 4 * 1024 * 1024;
 
 export async function POST(request: Request) {
+  const auth = await getAuthenticatedUserOrUnauthorized(request);
+
+  if (!auth.ok) {
+    return auth.response;
+  }
+
   let documentId: string | null = null;
   let failureStage: DocumentLifecycleStage = "processing";
 
@@ -39,17 +45,17 @@ export async function POST(request: Request) {
     const file = formData.get("file");
 
     if (!(file instanceof File)) {
-      return NextResponse.json({ error: "A PDF file is required." }, { status: 400 });
+      return privateJson({ error: "A PDF file is required." }, { status: 400 });
     }
 
     if (file.size <= 0) {
-      return NextResponse.json({ error: "The uploaded PDF is empty." }, { status: 400 });
+      return privateJson({ error: "The uploaded PDF is empty." }, { status: 400 });
     }
 
     const maxPdfUploadBytes = getMaxPdfUploadBytes();
 
     if (file.size > maxPdfUploadBytes) {
-      return NextResponse.json(
+      return privateJson(
         { error: `PDF uploads are limited to ${formatMegabytes(maxPdfUploadBytes)} MB for this deployment.` },
         { status: 413 }
       );
@@ -58,26 +64,30 @@ export async function POST(request: Request) {
     const originalFileName = sanitizeOriginalFileName(file.name);
 
     if (!isPdfLike(file, originalFileName)) {
-      return NextResponse.json({ error: "Only PDF files are supported." }, { status: 415 });
+      return privateJson({ error: "Only PDF files are supported." }, { status: 415 });
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
     if (!hasPdfHeader(buffer)) {
-      return NextResponse.json({ error: "The uploaded file is not a valid PDF." }, { status: 415 });
+      return privateJson({ error: "The uploaded file is not a valid PDF." }, { status: 415 });
     }
 
     const metadata = parseUploadMetadata(formData);
 
     if (!metadata.ok) {
-      return NextResponse.json({ error: metadata.error }, { status: 400 });
+      return privateJson({ error: metadata.error }, { status: 400 });
     }
 
     const contentSha256 = sha256Hex(buffer);
-    const storageObjectKey = createPdfObjectKey();
+    const ownerId = auth.user.id;
+    documentId = randomUUID();
+    const storageObjectKey = createPdfObjectKey(ownerId, documentId);
 
     const document = (await prisma.studyDocument.create({
       data: {
+        id: documentId,
+        ownerId,
         originalFileName,
         storedFileName: storageObjectKey,
         fileSize: file.size,
@@ -95,7 +105,6 @@ export async function POST(request: Request) {
         uploadStatus: DOCUMENT_UPLOAD_STATUS.UPLOADING
       }
     })) as { id: string };
-    documentId = document.id;
 
     failureStage = "storage_upload";
     await storage.uploadPdf({
@@ -123,10 +132,11 @@ export async function POST(request: Request) {
       prisma,
       storage,
       documentId: document.id,
+      ownerId,
       tags: metadata.value.tags
     });
 
-    return NextResponse.json(
+    return privateJson(
       {
         documentId: document.id,
         originalFileName,
@@ -149,7 +159,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(
+    return privateJson(
       {
         documentId,
         error: "PDF processing failed.",

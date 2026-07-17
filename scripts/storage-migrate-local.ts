@@ -1,5 +1,6 @@
 import { getPrisma } from "../src/lib/server/db";
 import {
+  createPdfObjectKey,
   createDocumentStorage,
   getStorageConfig,
   getSupabaseStorageConfig,
@@ -9,6 +10,7 @@ import { loadScriptEnv, requireDatabaseScriptConfig } from "./script-env";
 
 type LegacyDocument = {
   id: string;
+  ownerId: string;
   storedFileName: string;
   mimeType: string;
   storageProvider: string;
@@ -44,6 +46,7 @@ async function main() {
     },
     select: {
       id: true,
+      ownerId: true,
       storedFileName: true,
       mimeType: true,
       storageProvider: true,
@@ -92,7 +95,7 @@ async function main() {
     try {
       const buffer = await localStorage.readPdf(localKey);
       const checksum = sha256Hex(buffer);
-      const objectKey = createMigratedObjectKey(document.id, checksum);
+      const objectKey = createPdfObjectKey(document.ownerId, document.id);
 
       if (!(await supabaseStorage.exists(objectKey))) {
         await supabaseStorage.uploadPdf({
@@ -153,8 +156,4 @@ async function main() {
   if (summary.failed > 0) {
     process.exitCode = 1;
   }
-}
-
-function createMigratedObjectKey(documentId: string, checksum: string) {
-  return `documents/${documentId}-${checksum.slice(0, 32)}.pdf`;
 }

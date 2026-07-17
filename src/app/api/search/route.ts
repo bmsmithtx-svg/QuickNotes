@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-
+import { getAuthenticatedUserOrUnauthorized, privateJson } from "@/lib/server/auth";
 import { getEmbeddingRuntimeConfig } from "@/lib/server/embedding-config";
 import { EmbeddingServiceError, createOpenAIEmbeddingService } from "@/lib/server/embedding-service";
 import { hasStoredEmbeddings } from "@/lib/server/embedding-sync";
@@ -20,11 +19,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const auth = await getAuthenticatedUserOrUnauthorized(request);
+
+  if (!auth.ok) {
+    return auth.response;
+  }
+
   const url = new URL(request.url);
   const query = getTextParameter(url, "q");
 
   if (!query) {
-    return NextResponse.json({ error: "Search query parameter q is required." }, { status: 400 });
+    return privateJson({ error: "Search query parameter q is required." }, { status: 400 });
   }
 
   let filters: AppliedRetrievalFilters;
@@ -32,7 +37,7 @@ export async function GET(request: Request) {
   try {
     filters = normalizeRetrievalFilters(parseSearchFilters(url));
   } catch (error) {
-    return NextResponse.json(
+    return privateJson(
       {
         error: error instanceof Error ? error.message : "Invalid filters."
       },
@@ -42,25 +47,26 @@ export async function GET(request: Request) {
 
   const input: SearchChunksInput = {
     query,
+    ownerId: auth.user.id,
     filters,
     limit: getIntegerParameter(url, "limit")
   };
   const requestedMode = getSearchModeParameter(url);
 
   if (requestedMode === "invalid") {
-    return NextResponse.json({ error: "Search mode must be keyword, semantic, or hybrid." }, { status: 400 });
+    return privateJson({ error: "Search mode must be keyword, semantic, or hybrid." }, { status: 400 });
   }
 
   const prisma = await getPrisma();
   const embeddingConfig = getEmbeddingRuntimeConfig();
-  const semantic = await getSemanticAvailability(prisma, embeddingConfig);
+  const semantic = await getSemanticAvailability(prisma, embeddingConfig, auth.user.id);
   const actualMode = resolveSearchMode({
     requestedMode,
     semanticAvailable: semantic.semanticAvailable
   });
 
   if (requestedMode && requestedMode !== "keyword" && !semantic.semanticAvailable) {
-    return NextResponse.json(
+    return privateJson(
       {
         error:
           semantic.reason === "missing_api_key"
@@ -97,7 +103,7 @@ export async function GET(request: Request) {
           });
   } catch (error) {
     if (error instanceof EmbeddingServiceError) {
-      return NextResponse.json(
+      return privateJson(
         {
           error: getPublicEmbeddingErrorMessage(error),
           requestedMode: requestedMode ?? "auto",
@@ -127,7 +133,7 @@ export async function GET(request: Request) {
     results
   };
 
-  return NextResponse.json(response);
+  return privateJson(response);
 }
 
 function getPublicEmbeddingErrorMessage(error: EmbeddingServiceError) {
@@ -144,7 +150,8 @@ function getPublicEmbeddingErrorMessage(error: EmbeddingServiceError) {
 
 async function getSemanticAvailability(
   prisma: Awaited<ReturnType<typeof getPrisma>>,
-  config: ReturnType<typeof getEmbeddingRuntimeConfig>
+  config: ReturnType<typeof getEmbeddingRuntimeConfig>,
+  ownerId: string
 ): Promise<SearchModeAvailability> {
   if (!config.apiKey) {
     return {
@@ -155,7 +162,7 @@ async function getSemanticAvailability(
   }
 
   try {
-    const hasEmbeddings = await hasStoredEmbeddings(prisma, config.model, config.dimensions);
+    const hasEmbeddings = await hasStoredEmbeddings(prisma, config.model, config.dimensions, ownerId);
 
     return {
       semanticAvailable: hasEmbeddings,

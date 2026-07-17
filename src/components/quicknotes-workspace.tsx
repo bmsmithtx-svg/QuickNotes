@@ -9,6 +9,7 @@ import {
   Filter,
   FileText,
   Loader2,
+  LogOut,
   MessageSquareText,
   Quote,
   RefreshCw,
@@ -19,6 +20,7 @@ import {
   Upload,
   X
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -30,6 +32,7 @@ import {
   type ReactNode
 } from "react";
 
+import { createClient } from "@/lib/supabase/client";
 import type {
   AppliedRetrievalFilters,
   AnswerCitation,
@@ -125,7 +128,8 @@ const searchModeOptions: Array<{ mode: RetrievalMode; label: string }> = [
   { mode: "keyword", label: "Keyword" }
 ];
 
-export function QuickNotesWorkspace() {
+export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null }) {
+  const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<StudyDocumentSummary[]>([]);
   const [metadataOptions, setMetadataOptions] = useState<MetadataOptionsResponse>(emptyMetadataOptions);
@@ -176,6 +180,24 @@ export function QuickNotesWorkspace() {
   );
   const hasActiveFilters = useMemo(() => isFilterStateActive(filters), [filters]);
 
+  const handleUnauthorizedResponse = useCallback(
+    (response: Response) => {
+      if (response.status !== 401) {
+        return false;
+      }
+
+      router.replace("/auth?reason=session-expired");
+      return true;
+    },
+    [router]
+  );
+
+  async function handleSignOut() {
+    await createClient().auth.signOut();
+    router.replace("/auth");
+    router.refresh();
+  }
+
   const loadDocuments = useCallback(async (nextSelectedId?: string) => {
     setIsLoadingDocuments(true);
     try {
@@ -184,6 +206,10 @@ export function QuickNotesWorkspace() {
       });
 
       if (!response.ok) {
+        if (handleUnauthorizedResponse(response)) {
+          throw new Error("Session expired.");
+        }
+
         throw new Error("Could not load documents.");
       }
 
@@ -198,7 +224,7 @@ export function QuickNotesWorkspace() {
     } finally {
       setIsLoadingDocuments(false);
     }
-  }, [selectedDocumentId]);
+  }, [handleUnauthorizedResponse, selectedDocumentId]);
 
   const loadMetadataOptions = useCallback(async () => {
     setMetadataOptionsError(null);
@@ -209,6 +235,10 @@ export function QuickNotesWorkspace() {
       });
 
       if (!response.ok) {
+        if (handleUnauthorizedResponse(response)) {
+          throw new Error("Session expired.");
+        }
+
         throw new Error("Could not load metadata filters.");
       }
 
@@ -216,7 +246,7 @@ export function QuickNotesWorkspace() {
     } catch (error) {
       setMetadataOptionsError(error instanceof Error ? error.message : "Could not load metadata filters.");
     }
-  }, []);
+  }, [handleUnauthorizedResponse]);
 
   useEffect(() => {
     let isMounted = true;
@@ -261,6 +291,10 @@ export function QuickNotesWorkspace() {
     })
       .then(async (response) => {
         if (!response.ok) {
+          if (handleUnauthorizedResponse(response)) {
+            throw new Error("Session expired.");
+          }
+
           throw new Error("Could not load document preview.");
         }
 
@@ -280,7 +314,7 @@ export function QuickNotesWorkspace() {
     return () => {
       controller.abort();
     };
-  }, [selectedDocumentId]);
+  }, [handleUnauthorizedResponse, selectedDocumentId]);
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -310,6 +344,10 @@ export function QuickNotesWorkspace() {
         method: "POST",
         body: formData
       });
+      if (handleUnauthorizedResponse(response)) {
+        throw new Error("Session expired.");
+      }
+
       const payload = (await response.json()) as Partial<DocumentUploadResponse> & { error?: string };
 
       if (!response.ok || !payload.documentId) {
@@ -351,6 +389,10 @@ export function QuickNotesWorkspace() {
       const response = await fetch(`/api/search?${parameters.toString()}`, {
         cache: "no-store"
       });
+      if (handleUnauthorizedResponse(response)) {
+        throw new Error("Session expired.");
+      }
+
       const payload = (await response.json()) as SearchResponse | SearchErrorPayload;
 
       if (!response.ok || !("results" in payload)) {
@@ -423,6 +465,10 @@ export function QuickNotesWorkspace() {
           filters: filtersToPayload(filters)
         })
       });
+      if (handleUnauthorizedResponse(response)) {
+        throw new Error("Session expired.");
+      }
+
       const payload = (await response.json()) as AnswerResponse | AnswerErrorPayload;
 
       if (!response.ok || !("status" in payload)) {
@@ -473,6 +519,10 @@ export function QuickNotesWorkspace() {
           tags: splitTags(metadataForm.tags)
         })
       });
+      if (handleUnauthorizedResponse(response)) {
+        throw new Error("Session expired.");
+      }
+
       const payload = (await response.json()) as DocumentDetailResponse | { error?: string };
 
       if (!response.ok || !("document" in payload)) {
@@ -518,6 +568,10 @@ export function QuickNotesWorkspace() {
       const response = await fetch(`/api/documents/${document.id}/retry`, {
         method: "POST"
       });
+      if (handleUnauthorizedResponse(response)) {
+        throw new Error("Session expired.");
+      }
+
       const payload = (await response.json()) as Partial<DocumentUploadResponse> & { error?: string };
 
       if (!response.ok) {
@@ -547,6 +601,10 @@ export function QuickNotesWorkspace() {
       const response = await fetch(`/api/documents/${document.id}`, {
         method: "DELETE"
       });
+      if (handleUnauthorizedResponse(response)) {
+        throw new Error("Session expired.");
+      }
+
       const payload = (await response.json()) as { error?: string; status?: string };
 
       if (!response.ok) {
@@ -579,6 +637,7 @@ export function QuickNotesWorkspace() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {userEmail ? <span className="text-sm text-[var(--muted)]">{userEmail}</span> : null}
             <button
               type="button"
               onClick={() => loadDocuments().catch(() => setUploadError("Could not refresh documents."))}
@@ -595,6 +654,17 @@ export function QuickNotesWorkspace() {
               <Database aria-hidden="true" size={16} />
               API status
             </a>
+            <button
+              type="button"
+              onClick={() => {
+                void handleSignOut();
+              }}
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-3 text-sm font-medium text-[var(--foreground)]"
+              title="Sign out"
+            >
+              <LogOut aria-hidden="true" size={16} />
+              Sign out
+            </button>
           </div>
         </header>
 

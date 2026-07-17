@@ -2,7 +2,7 @@
 
 QuickNotes is a study app for learning from uploaded course material. Students can upload PDF textbooks, class notes, and study documents, search extracted chunks, and ask questions that are answered only from retrieved source evidence.
 
-The current milestone extends the production persistence foundation with durable PDF source storage and Vercel deployment readiness. Supabase-compatible PostgreSQL through Prisma remains the database of record, pgvector backs semantic retrieval, PostgreSQL full-text search backs keyword retrieval, and uploaded PDF source files can now be stored in a private Supabase Storage bucket. Authentication, row-level security, payments, and collaborative accounts remain out of scope; use deployment protection for non-local deployments until an auth milestone is added.
+The current milestone adds Supabase email/password authentication, per-user document ownership, server-side authorization, owner-scoped storage paths, and Supabase Row-Level Security. Supabase-compatible PostgreSQL through Prisma remains the database of record, pgvector backs semantic retrieval, PostgreSQL full-text search backs keyword retrieval, and uploaded PDF source files are stored in a private Supabase Storage bucket.
 
 ## Why PostgreSQL And pgvector
 
@@ -13,37 +13,45 @@ Keyword retrieval now uses PostgreSQL full-text search over `DocumentChunk.text`
 ## Architecture
 
 - Next.js App Router serves the workspace UI and API routes.
+- Supabase Auth provides email/password sign-up, sign-in, sign-out, cookie-backed session persistence, and server-side session refresh through `@supabase/ssr`.
+- The main workspace is protected server-side. Unauthenticated API requests return HTTP 401.
 - Prisma targets PostgreSQL with `DATABASE_URL` for runtime traffic and `DIRECT_URL` for migrations.
 - `prisma.config.ts` loads `.env.local` for Prisma CLI commands without moving secrets into tracked files.
-- `StudyDocument`, `DocumentPage`, `DocumentChunk`, `DocumentChunkEmbedding`, `Tag`, and `DocumentTag` are stored in PostgreSQL.
+- `StudyDocument`, `DocumentPage`, `DocumentChunk`, `DocumentChunkEmbedding`, per-user `Tag`, and `DocumentTag` rows are stored in PostgreSQL.
+- `StudyDocument.ownerId` and `Tag.ownerId` are Supabase Auth user UUIDs. Pages, chunks, embeddings, and document-tag links are authorized through their parent document and tag ownership.
 - `DocumentChunkEmbedding.vector` is a `vector(1536)` pgvector column. `OPENAI_EMBEDDING_DIMENSIONS` must match that column.
 - `pdfjs-dist` extracts PDF text layers.
 - PDF source storage is accessed through a server-side adapter. `QUICKNOTES_STORAGE_PROVIDER=local` keeps local filesystem development; `QUICKNOTES_STORAGE_PROVIDER=supabase` stores source PDFs in a private Supabase Storage bucket with the service-role key used only on the server.
-- Source PDFs use collision-resistant object keys under `documents/`. Original filenames are stored separately for display and citations.
+- New source PDFs use deterministic owner-scoped object keys: `<ownerId>/<documentId>/source.pdf`. Original filenames are stored separately for display and citations.
 - Document lifecycle states are `UPLOADING`, `PROCESSING`, `READY`, `FAILED`, and `DELETING`.
 - Production env validation is available through `npm run smoke:production`; it fails closed for local database URLs, local PDF storage, missing OpenAI/Supabase variables, invalid embedding dimensions, or leaked `NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY`.
 - Metadata filters are applied inside SQL before keyword, semantic, or hybrid candidate selection.
 - Answer generation reuses the same retrieval helpers and never runs a separate unfiltered retrieval path.
+- Retrieval, metadata-option aggregation, answer context construction, and citation validation are scoped to `StudyDocument.ownerId` inside the database query. Client-supplied owner IDs are ignored.
 - OpenAI calls are isolated in server-side services under `src/lib/server/`.
 
 ## Supabase Setup
 
 1. Create a Supabase project.
-2. Enable pgvector in the SQL editor if it is not already enabled:
+2. Enable email/password sign-in in Supabase Auth.
+3. Add the local and production app URLs to Supabase Auth redirect URLs.
+4. Enable pgvector in the SQL editor if it is not already enabled:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-3. Set `DATABASE_URL` in `.env.local` to the Supabase transaction-mode pooler connection string for application runtime.
-4. Set `DIRECT_URL` in `.env.local` to the Supabase session-mode pooler connection string for Prisma migrations and schema management.
-5. Create a private Supabase Storage bucket for PDFs, or let the app create it with the service-role key:
+5. Set `DATABASE_URL` in `.env.local` to the Supabase transaction-mode pooler connection string for application runtime.
+6. Set `DIRECT_URL` in `.env.local` to the Supabase session-mode pooler connection string for Prisma migrations and schema management.
+7. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` for browser/server auth clients.
+8. Set server-only `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET` for privileged storage operations.
+9. Create a private Supabase Storage bucket for PDFs, or let the app create it with the service-role key:
 
 ```bash
 QUICKNOTES_STORAGE_PROVIDER=supabase npm run storage:ensure-bucket
 ```
 
-6. Run:
+10. Run:
 
 ```bash
 npx prisma generate
@@ -54,6 +62,15 @@ npm run smoke:production
 ```
 
 The migration also includes `CREATE EXTENSION IF NOT EXISTS vector;` so fresh databases are initialized automatically when the database role has permission.
+
+If the target database already has QuickNotes documents from before authentication, create the real Supabase Auth account that should own those legacy documents before running the auth migration. The migration intentionally fails unless existing rows can be assigned to exactly one existing `auth.users.id`. After migrations succeed, run:
+
+```bash
+npm run storage:migrate-owner-paths -- --delete-legacy-source
+npm run storage:reconcile
+```
+
+This copies legacy PDF objects to `<ownerId>/<documentId>/source.pdf`, updates database storage metadata after verification, and optionally removes the old object.
 
 Supabase's transaction-mode pooler can conflict with prepared statements. Runtime Prisma clients call `withSupabaseTransactionPoolerCompatibility` and add `pgbouncer=true` to Supabase port `6543` URLs when the parameter is not already present. Migration commands use `DIRECT_URL`, which points at the session-mode pooler instead.
 
@@ -76,9 +93,13 @@ QUICKNOTES_LOCAL_STORAGE_ROOT=
 QUICKNOTES_LOCAL_STORAGE_BUCKET=local
 QUICKNOTES_MAX_PDF_UPLOAD_BYTES=
 
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 SUPABASE_STORAGE_BUCKET=quicknotes-pdfs
+
+QUICKNOTES_LEGACY_OWNER_ID=
 
 # Required only for destructive test databases.
 QUICKNOTES_TEST_DATABASE=
@@ -87,7 +108,9 @@ QUICKNOTES_ALLOW_DESTRUCTIVE_DB=
 
 Without an OpenAI key, uploads, document browsing, and keyword search remain usable. Semantic/hybrid retrieval and answer generation need stored embeddings and a valid OpenAI key. Current live OpenAI answer/eval requests may fail when the configured key lacks billing or model permissions; that external rejection is not treated as an application-code failure.
 
-Production requires `DATABASE_URL`, `DIRECT_URL`, `OPENAI_API_KEY`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS`, `OPENAI_CHAT_MODEL`, `QUICKNOTES_STORAGE_PROVIDER=supabase`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET`. `SUPABASE_SERVICE_ROLE_KEY` is server-only. Do not create `NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY`; the application rejects that configuration so the service-role credential is not exposed to browser code.
+Production requires `DATABASE_URL`, `DIRECT_URL`, `OPENAI_API_KEY`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_EMBEDDING_DIMENSIONS`, `OPENAI_CHAT_MODEL`, `QUICKNOTES_STORAGE_PROVIDER=supabase`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET`. `SUPABASE_SERVICE_ROLE_KEY` is server-only. Do not create `NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY`; the application rejects that configuration so the service-role credential is not exposed to browser code.
+
+`QUICKNOTES_LEGACY_OWNER_ID` is only for legacy imports or manual pre-auth backfills. It must be a real Supabase Auth user UUID and should not be used to trust client input.
 
 `QUICKNOTES_MAX_PDF_UPLOAD_BYTES` is optional. The upload route defaults to 25 MB outside Vercel and 4 MB on Vercel to stay below the platform request body limit. Larger production PDFs need a direct-to-storage upload workflow before raising this limit on Vercel.
 
@@ -118,6 +141,7 @@ Useful storage commands:
 ```bash
 npm run storage:ensure-bucket
 npm run storage:migrate-local
+npm run storage:migrate-owner-paths -- --delete-legacy-source
 npm run storage:reconcile
 npm run storage:reconcile -- --verify-checksums
 npm run storage:retry -- <documentId>
@@ -150,6 +174,8 @@ Set these Vercel environment variables for Production and Preview as appropriate
 - `OPENAI_EMBEDDING_DIMENSIONS=1536`
 - `OPENAI_CHAT_MODEL=gpt-5-mini`
 - `QUICKNOTES_STORAGE_PROVIDER=supabase`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SUPABASE_STORAGE_BUCKET=quicknotes-pdfs`
@@ -174,7 +200,7 @@ All API routes that touch Prisma, PDF parsing, storage, embeddings, or OpenAI us
 
 The current direct upload route receives the PDF through the Next.js route handler before storing it in Supabase Storage. On Vercel, this path is limited by the function request body limit, so production uploads default to 4 MB. Larger textbooks require a future direct browser-to-Supabase upload flow followed by server-side processing from the private object.
 
-Until application authentication is implemented, do not expose an unprotected production deployment to the public internet. Use Vercel Deployment Protection, an internal network, or equivalent access control so document list/detail/source routes are not publicly reachable.
+Keep Vercel Deployment Protection enabled for this milestone. Supabase Auth protects the application workspace and API routes, but deployment protection still shields the production deployment from unsolicited traffic during validation.
 
 ## Migration Details
 
@@ -184,9 +210,14 @@ Active Prisma migrations live in `prisma/migrations` and are PostgreSQL-only. Th
 
 `20260713120000_supabase_storage_lifecycle` adds durable source-storage metadata, content checksums, lifecycle diagnostics, processing attempt counts, and timestamp fields. Existing rows are backfilled as local-storage records with `storageObjectKey = storedFileName`, and legacy lowercase statuses are normalized to the lifecycle states.
 
+`20260715170000_auth_owner_rls` adds non-null `StudyDocument.ownerId` and `Tag.ownerId` UUID columns, changes tag uniqueness to `(ownerId, normalizedName)`, adds owner-scoped document indexes, enables RLS on user-owned tables, and creates Supabase Storage policies for `quicknotes-pdfs`. Existing documents/tags are backfilled only when exactly one Supabase Auth user exists; otherwise the migration fails with a manual-action error instead of assigning data to an invented owner.
+
+After the auth migration, `npm run storage:migrate-owner-paths -- --delete-legacy-source` migrates legacy Supabase or local PDF objects to `<ownerId>/<documentId>/source.pdf`. Run `npm run storage:reconcile` afterward; it reports legacy or unscoped object keys as metadata inconsistencies until they are migrated.
+
 The PostgreSQL schema preserves:
 
 - Document IDs and stored PDF filenames
+- Supabase Auth owner IDs after the auth migration
 - Page IDs, page numbers, and page text
 - Chunk IDs, page numbers, chunk indexes, and source text
 - Upload status, failure reason, page counts, and timestamps
@@ -262,6 +293,10 @@ type RetrievalFilters = {
 
 ## APIs
 
+All document, search, answer, metadata, source, retry, upload, and deletion APIs require a verified Supabase Auth session. Browser requests use the cookie-backed SSR session. Smoke scripts can pass a Supabase access token as `Authorization: Bearer <token>`; the server still verifies it with Supabase `getClaims()`.
+
+The server never accepts an owner ID from request bodies, URLs, query parameters, or client state. Ownership is derived from the authenticated Supabase user and inserted into Prisma/SQL queries on the server. Cross-user document IDs return 404 for document-specific APIs to avoid resource-existence leakage.
+
 Search:
 
 ```text
@@ -290,18 +325,30 @@ DELETE /api/documents/:id
 
 Deletion first marks the document `DELETING`, which excludes it from retrieval, then deletes the stored source PDF and finally deletes the database row with cascading relationships.
 
+## Authorization And RLS
+
+QuickNotes uses two authorization layers:
+
+- Server-side enforcement: all route handlers call `requireAuthenticatedUser`, derive `ownerId` from verified Supabase claims, and apply owner predicates before reading, updating, retrieving, answering, signing source URLs, retrying, or deleting.
+- Supabase RLS defense in depth: `StudyDocument` and `Tag` use direct `ownerId = auth.uid()` policies. `DocumentPage`, `DocumentChunk`, `DocumentChunkEmbedding`, and `DocumentTag` use parent-document and tag ownership checks. Storage policies restrict `quicknotes-pdfs` objects to paths whose first folder is the authenticated user ID.
+
+Prisma runtime queries may use a privileged Postgres role that bypasses RLS depending on the configured Supabase connection. RLS is still required for defense in depth and any future Supabase client access, but application authorization does not rely on RLS alone.
+
+Service-role storage operations remain server-only. Before using the service-role key to read, sign, or delete an object, the route has already verified that the database document belongs to the authenticated user.
+
 ## Durable Storage Lifecycle
 
 Upload flow:
 
 1. Validate the uploaded PDF.
-2. Reserve a `StudyDocument` row in `UPLOADING`.
-3. Upload the original PDF through the configured storage adapter.
-4. Persist storage provider, bucket, object key, content checksum, MIME type, and size.
-5. Transition to `PROCESSING`.
-6. Read the PDF back through the storage adapter.
-7. Extract pages, create chunks, sync metadata, and generate embeddings through the existing embedding pipeline.
-8. Mark the document `READY`.
+2. Resolve the authenticated Supabase user on the server.
+3. Reserve a `StudyDocument` row in `UPLOADING` with `ownerId = auth.uid()`.
+4. Upload the original PDF through the configured storage adapter to `<ownerId>/<documentId>/source.pdf`.
+5. Persist storage provider, bucket, object key, content checksum, MIME type, and size.
+6. Transition to `PROCESSING`.
+7. Read the PDF back through the storage adapter.
+8. Extract pages, create chunks, sync owner-scoped metadata, and generate embeddings through the existing embedding pipeline.
+9. Mark the document `READY`.
 
 If processing fails, QuickNotes marks the document `FAILED`, stores a sanitized failure stage and message, removes derived pages/chunks/embeddings when safe, and keeps the source PDF for retry. `npm run storage:retry -- <documentId>` and `POST /api/documents/:id/retry` reuse the stored PDF and clear derived rows first, so reruns do not duplicate chunks or embeddings.
 
@@ -314,7 +361,8 @@ If processing fails, QuickNotes marks the document `FAILED`, stores a sanitized 
 `npm run storage:reconcile` reports:
 
 - database documents whose storage object is missing
-- storage objects under `documents/` with no matching database row
+- storage objects with no matching database row
+- documents whose storage object key is not owner-scoped
 - documents stuck in `UPLOADING`, `PROCESSING`, or `DELETING`
 - failed documents eligible for retry
 - missing storage metadata
@@ -373,7 +421,7 @@ Production persistence smoke test:
 npm run smoke:production
 ```
 
-This command requires the production Supabase/OpenAI variables listed above. It validates the environment without printing secrets, verifies database connectivity, verifies the Supabase Storage bucket is private, uploads a generated PDF through the application pipeline, confirms the source object exists, confirms embeddings were persisted for the new chunks, runs keyword/semantic/hybrid retrieval against the persisted document, generates a citation-backed hybrid answer, verifies citations point back to the persisted source text, deletes the document through the API, and verifies the database row and PDF object are gone.
+This command requires the production Supabase/OpenAI/auth variables listed above. It validates the environment without printing secrets, creates two temporary Supabase Auth users, verifies database connectivity, verifies the Supabase Storage bucket is private, uploads a generated PDF as User A through the application pipeline, confirms the source object exists at an owner-scoped path, confirms embeddings were persisted for the new chunks, runs keyword/semantic/hybrid retrieval as User A, generates a citation-backed hybrid answer as User A, verifies User B cannot list/detail/source/retry/delete/search/answer from User A's document, deletes the document through the API, verifies the database row and PDF object are gone, and deletes the temporary Auth users.
 
 ## Citation And Grounding
 
@@ -386,6 +434,7 @@ Prompt-injection defenses remain in place:
 - Commands or role changes inside PDFs are ignored.
 - Excluded documents never reach answer context.
 - The browser never receives `OPENAI_API_KEY`.
+- The browser never receives `SUPABASE_SERVICE_ROLE_KEY`.
 
 ## Tests And Evaluation
 
@@ -443,27 +492,18 @@ July 15, 2026:
 
 ## Current Verification
 
-Verified on July 15, 2026:
+Verified on July 15, 2026 before applying the pending auth/RLS migration:
 
-- `npx prisma validate`: passed
-- Production environment validation: passed without printing configured values
-- `npx prisma migrate status`: passed against Supabase with 2 migrations; database schema is up to date
-- `npm run db:migrate:deploy`: passed against Supabase; no pending migrations
+- `npx prisma format`: passed
+- `npm run db:prisma:validate`: passed
+- `npm run db:migrate:status`: reached Supabase and correctly reported pending migration `20260715170000_auth_owner_rls`
 - `npm run typecheck`: passed
 - `npm run lint`: passed
-- `npm run test:unit`: passed, 84 tests
+- `npm run test:unit`: passed, 86 tests
 - `npm run test:db-safety`: passed
-- `npm run test:integration`: blocked by design because `.env.local` points at a non-test Supabase database
 - `npm run eval:offline`: passed, all tracked rates 1.000
-- `npm run smoke:retrieval`: passed
-- `npm run smoke:answer`: passed with configured OpenAI credentials after network access was allowed
-- `npm run eval:live`: passed with 1.000 retrieval, citation, prompt-injection, grounded-claim, and fully grounded-answer rates using `gpt-5-mini` after network access was allowed
-- `npm run db:validate-vectors`: passed against Supabase; 3 documents, 2 pages, 2 chunks, 2 embeddings, no missing/stale/invalid/duplicate vectors
 - `npm run build`: passed with Prisma generation followed by `next build --webpack`
-- `QUICKNOTES_STORAGE_PROVIDER=supabase npm run storage:ensure-bucket`: passed against private Supabase Storage; bucket existed and was not public
-- `QUICKNOTES_STORAGE_PROVIDER=supabase npm run smoke:production`: passed; verified PDF upload through the application route, private Supabase Storage persistence, PostgreSQL document/page/chunk/embedding persistence, pgvector retrieval, citation-grounded answer generation, signed source PDF access without service-role key exposure, document/storage deletion, and smoke-data cleanup
-- `npm run smoke:app`: not rerun in this verification pass to avoid adding local-storage smoke rows to the Supabase database
-- `npm run dev` and `npm run start`: not rerun in this verification pass
+- Production `npm run db:migrate:deploy`, `npm run db:validate-vectors`, `npm run smoke:app`, `npm run smoke:production`, `npm run smoke:retrieval`, `npm run smoke:answer`, and `npm run eval:live`: blocked until a real legacy owner Auth user exists and `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are configured.
 
 Package scripts use `node --import tsx` instead of the `tsx` CLI so scripts can run in the Codex sandbox without the `listen EPERM` IPC failure.
 
@@ -474,9 +514,9 @@ Package scripts use `node --import tsx` instead of the `tsx` CLI so scripts can 
 - Local filesystem PDF storage remains available for development through `QUICKNOTES_STORAGE_PROVIDER=local`.
 - Vercel direct route uploads default to 4 MB because the PDF currently passes through a function request body before Supabase Storage. Larger PDFs require a future direct-to-storage upload flow.
 - OCR for scanned PDFs is not implemented.
-- Application authentication and row-level security are not implemented in this milestone. Use Vercel Deployment Protection or equivalent access control before exposing a deployment with real documents.
+- Existing pre-auth production documents require a real Supabase Auth owner assignment before the auth/RLS migration can be applied. The migration fails closed when it cannot determine that owner safely.
 - Live answer/eval verification depends on a working OpenAI key with billing/model access.
 
 ## Recommended Next Milestone
 
-Authentication, authorization, and row-level security for multi-user document libraries.
+General UI redesign and portfolio polish after the auth/ownership production rollout is validated.

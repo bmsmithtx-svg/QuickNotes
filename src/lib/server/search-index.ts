@@ -1,7 +1,7 @@
 import type { ChunkSearchResult } from "../types";
 import type { PrismaTransactionLike } from "./db";
 import { parseTags } from "./document-mappers";
-import { appendRetrievalFilterSql, getAppliedRetrievalFilters, tagJsonSelect } from "./retrieval-filters";
+import { appendOwnerFilterSql, appendRetrievalFilterSql, getAppliedRetrievalFilters, tagJsonSelect } from "./retrieval-filters";
 import type { RetrievalFilters } from "../types";
 import { addSqlParameter, addSqlParameterList } from "./sql";
 
@@ -13,6 +13,7 @@ export type SearchIndexChunk = {
 
 export type SearchChunksInput = {
   query: string;
+  ownerId?: string;
   documentId?: string;
   documentIds?: string[];
   className?: string;
@@ -83,6 +84,7 @@ export async function searchChunks(db: PrismaTransactionLike, input: SearchChunk
   const queryParameter = addSqlParameter(parameters, normalizedQuery);
   const appliedFilters = getAppliedRetrievalFilters(input);
 
+  appendOwnerFilterSql(filters, parameters, input.ownerId);
   appendRetrievalFilterSql(filters, parameters, appliedFilters);
 
   const whereClause = filters.length > 0 ? `AND ${filters.join(" AND ")}` : "";

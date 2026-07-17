@@ -13,6 +13,7 @@ type TransferOptions = {
   apply: boolean;
   source: string;
   includeEmbeddings: boolean;
+  ownerId?: string;
 };
 
 type StudyDocumentRow = {
@@ -128,6 +129,7 @@ async function main() {
   }
 
   requireDatabaseScriptConfig();
+  options.ownerId = requireLegacyOwnerId();
 
   const prisma = (await getPrisma()) as unknown as TransferPrisma;
 
@@ -174,6 +176,7 @@ async function transferRows(prisma: TransferPrisma, source: string, options: Tra
   const insertedDocuments = await prisma.studyDocument.createMany({
     data: documents.map((row) => ({
       id: row.id,
+      ownerId: options.ownerId,
       originalFileName: row.originalFileName,
       storedFileName: row.storedFileName,
       fileSize: Number(row.fileSize),
@@ -224,6 +227,7 @@ async function transferRows(prisma: TransferPrisma, source: string, options: Tra
   const insertedTags = await prisma.tag.createMany({
     data: tags.map((row) => ({
       id: row.id,
+      ownerId: options.ownerId,
       name: row.name,
       normalizedName: row.normalizedName,
       createdAt: parseRequiredDate(row.createdAt),
@@ -370,6 +374,20 @@ function parseOptionalDate(value: string | null, dateOnly: boolean) {
   }
 
   return date;
+}
+
+function requireLegacyOwnerId() {
+  const ownerId = process.env.QUICKNOTES_LEGACY_OWNER_ID?.trim();
+
+  if (!ownerId) {
+    throw new Error("QUICKNOTES_LEGACY_OWNER_ID is required when transferring legacy rows into the auth-enabled schema.");
+  }
+
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ownerId)) {
+    throw new Error("QUICKNOTES_LEGACY_OWNER_ID must be a Supabase Auth user UUID.");
+  }
+
+  return ownerId;
 }
 
 function parseOptions(args: string[]): TransferOptions {

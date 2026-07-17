@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-
+import { getAuthenticatedUserOrUnauthorized, privateJson } from "@/lib/server/auth";
 import { getAnswerRuntimeConfig } from "@/lib/server/answer-config";
 import {
   AnswerGenerationError,
@@ -17,18 +16,24 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
+  const auth = await getAuthenticatedUserOrUnauthorized(request);
+
+  if (!auth.ok) {
+    return auth.response;
+  }
+
   let payload: unknown;
 
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
+    return privateJson({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
   const parsed = parseAnswerRequestPayload(payload);
 
   if (!parsed.ok) {
-    return NextResponse.json({ error: parsed.error }, { status: 400 });
+    return privateJson({ error: parsed.error }, { status: 400 });
   }
 
   const prisma = await getPrisma();
@@ -37,7 +42,7 @@ export async function POST(request: Request) {
 
   if (parsed.value.mode !== "keyword") {
     if (!embeddingConfig.apiKey) {
-      return NextResponse.json(
+      return privateJson(
         {
           error: "Server AI configuration is required for semantic and hybrid answer retrieval.",
           retrievalMode: parsed.value.mode,
@@ -47,10 +52,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const hasEmbeddings = await hasStoredEmbeddings(prisma, embeddingConfig.model, embeddingConfig.dimensions);
+    const hasEmbeddings = await hasStoredEmbeddings(prisma, embeddingConfig.model, embeddingConfig.dimensions, auth.user.id);
 
     if (!hasEmbeddings) {
-      return NextResponse.json(
+      return privateJson(
         {
           error: `No embeddings are stored for ${embeddingConfig.model}. Run npm run embeddings:backfill before semantic or hybrid answers.`,
           retrievalMode: parsed.value.mode,
@@ -72,16 +77,23 @@ export async function POST(request: Request) {
   const answerClient = answerConfig.apiKey ? new OpenAIResponsesAnswerClient(answerConfig.apiKey) : undefined;
 
   try {
-    const answer = await generateCitationBackedAnswer(prisma, parsed.value, {
-      model: answerConfig.model,
-      client: answerClient,
-      embeddingService
-    });
+    const answer = await generateCitationBackedAnswer(
+      prisma,
+      {
+        ...parsed.value,
+        ownerId: auth.user.id
+      },
+      {
+        model: answerConfig.model,
+        client: answerClient,
+        embeddingService
+      }
+    );
 
-    return NextResponse.json(answer);
+    return privateJson(answer);
   } catch (error) {
     if (error instanceof EmbeddingServiceError) {
-      return NextResponse.json(
+      return privateJson(
         {
           error: getPublicEmbeddingErrorMessage(error),
           retrievalMode: parsed.value.mode,
@@ -92,7 +104,7 @@ export async function POST(request: Request) {
     }
 
     if (error instanceof AnswerGenerationError) {
-      return NextResponse.json(
+      return privateJson(
         {
           error: getPublicAnswerErrorMessage(error),
           retrievalMode: parsed.value.mode,

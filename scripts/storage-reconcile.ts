@@ -1,15 +1,16 @@
 import { DOCUMENT_UPLOAD_STATUS, toDocumentUploadStatus } from "../src/lib/server/document-lifecycle";
 import { getPrisma } from "../src/lib/server/db";
 import {
-  DOCUMENT_SOURCE_PREFIX,
   getDocumentStorage,
   getDocumentStorageForRecord,
+  isOwnerScopedPdfObjectKey,
   sha256Hex
 } from "../src/lib/server/storage";
 import { loadScriptEnv, requireDatabaseScriptConfig } from "./script-env";
 
 type StorageDocument = {
   id: string;
+  ownerId: string;
   fileSize: number;
   uploadStatus: string;
   storageProvider: string;
@@ -44,6 +45,7 @@ async function main() {
     },
     select: {
       id: true,
+      ownerId: true,
       fileSize: true,
       uploadStatus: true,
       storageProvider: true,
@@ -96,6 +98,13 @@ async function main() {
       continue;
     }
 
+    if (!isOwnerScopedPdfObjectKey(document.storageObjectKey, document.ownerId, document.id)) {
+      report.metadataInconsistencies.push({
+        documentId: document.id,
+        issue: "storage_object_key_is_not_owner_scoped"
+      });
+    }
+
     const storage = getDocumentStorageForRecord(document);
     const exists = await storage.exists(document.storageObjectKey);
 
@@ -122,7 +131,7 @@ async function main() {
   }
 
   const objects = await currentStorage.listObjects({
-    prefix: DOCUMENT_SOURCE_PREFIX,
+    prefix: "",
     limit: 5000
   });
 

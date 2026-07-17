@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-
+import { getAuthenticatedUserOrUnauthorized, privateJson } from "@/lib/server/auth";
 import {
   getDocumentInclude,
   mapDocumentContentResponse,
@@ -19,6 +18,12 @@ type RouteContext = {
 };
 
 export async function GET(request: Request, { params }: RouteContext) {
+  const auth = await getAuthenticatedUserOrUnauthorized(request);
+
+  if (!auth.ok) {
+    return auth.response;
+  }
+
   const { id } = await params;
   const url = new URL(request.url);
   const pageLimit = getBoundedInteger(url.searchParams.get("pageLimit"), 3, 20);
@@ -27,21 +32,25 @@ export async function GET(request: Request, { params }: RouteContext) {
   const chunkOffset = getBoundedInteger(url.searchParams.get("chunkOffset"), 0, 5000);
   const prisma = await getPrisma();
 
-  const document = (await prisma.studyDocument.findUnique({
+  const document = (await prisma.studyDocument.findFirst?.({
     where: {
-      id
+      id,
+      ownerId: auth.user.id
     },
     include: getDocumentInclude()
   })) as DocumentWithCounts | null;
 
   if (!document) {
-    return NextResponse.json({ error: "Document not found." }, { status: 404 });
+    return privateJson({ error: "Document not found." }, { status: 404 });
   }
 
   const [pages, chunks] = await Promise.all([
     prisma.documentPage.findMany({
       where: {
-        documentId: id
+        documentId: id,
+        document: {
+          ownerId: auth.user.id
+        }
       },
       orderBy: {
         pageNumber: "asc"
@@ -51,7 +60,10 @@ export async function GET(request: Request, { params }: RouteContext) {
     }),
     prisma.documentChunk.findMany({
       where: {
-        documentId: id
+        documentId: id,
+        document: {
+          ownerId: auth.user.id
+        }
       },
       orderBy: [{ pageNumber: "asc" }, { chunkIndex: "asc" }],
       skip: chunkOffset,
@@ -59,7 +71,7 @@ export async function GET(request: Request, { params }: RouteContext) {
     })
   ]) as [DocumentPageRow[], DocumentChunkRow[]];
 
-  return NextResponse.json(
+  return privateJson(
     mapDocumentContentResponse({
       document,
       pages,

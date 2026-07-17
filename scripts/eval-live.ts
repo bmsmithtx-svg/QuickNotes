@@ -174,7 +174,7 @@ class OpenAIFaithfulnessEvaluator implements FaithfulnessEvaluator {
 }
 
 function parseFaithfulnessOutput(text: string): FaithfulnessEvaluation[] | null {
-  const parsed = safeJsonParse(text);
+  const parsed = safeJsonParse(text) ?? safeJsonParse(extractJsonObject(text));
 
   if (!parsed || typeof parsed !== "object") {
     return null;
@@ -215,6 +215,17 @@ function parseFaithfulnessOutput(text: string): FaithfulnessEvaluation[] | null 
   }
 
   return normalized;
+}
+
+function extractJsonObject(text: string) {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+
+  if (start === -1 || end === -1 || end <= start) {
+    return "";
+  }
+
+  return text.slice(start, end + 1);
 }
 
 function extractOutputText(payload: unknown) {

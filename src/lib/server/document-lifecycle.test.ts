@@ -280,6 +280,7 @@ function createLifecycleState(
 ) {
   const document: LifecycleDocument = {
     id: "doc_1",
+    ownerId: "11111111-1111-4111-8111-111111111111",
     originalFileName: "source.pdf",
     storedFileName: "documents/source.pdf",
     fileSize: pdfBuffer.byteLength,
@@ -298,7 +299,7 @@ function createLifecycleState(
   };
   const pages = [...(overrides.pages ?? [])];
   const chunks = [...(overrides.chunks ?? [])];
-  const tags: Array<{ id: string; name: string; normalizedName: string }> = [];
+  const tags: Array<{ id: string; ownerId: string; name: string; normalizedName: string }> = [];
   const documentTags: Array<{ documentId: string; tagId: string }> = [];
   let deleted = false;
   const prisma: any = {
@@ -360,8 +361,10 @@ function createLifecycleState(
       create: async () => ({}),
       update: async () => ({}),
       createMany: async () => ({ count: 0 }),
-      upsert: async (args: { create: { name: string; normalizedName: string } }) => {
-        const existing = tags.find((tag) => tag.normalizedName === args.create.normalizedName);
+      upsert: async (args: { create: { ownerId: string; name: string; normalizedName: string } }) => {
+        const existing = tags.find(
+          (tag) => tag.ownerId === args.create.ownerId && tag.normalizedName === args.create.normalizedName
+        );
 
         if (existing) {
           return existing;
@@ -369,6 +372,7 @@ function createLifecycleState(
 
         const tag = {
           id: `tag_${tags.length + 1}`,
+          ownerId: args.create.ownerId,
           name: args.create.name,
           normalizedName: args.create.normalizedName
         };
@@ -411,6 +415,7 @@ function createLifecycleState(
 
 type LifecycleDocument = {
   id: string;
+  ownerId: string;
   originalFileName: string;
   storedFileName: string;
   fileSize: number;

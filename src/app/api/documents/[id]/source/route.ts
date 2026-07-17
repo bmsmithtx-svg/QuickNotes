@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getAuthenticatedUserOrUnauthorized, privateJson } from "@/lib/server/auth";
 import { DOCUMENT_UPLOAD_STATUS, toDocumentUploadStatus } from "@/lib/server/document-lifecycle";
 import { getPrisma } from "@/lib/server/db";
 import { getDocumentStorageForRecord, SIGNED_SOURCE_URL_TTL_SECONDS } from "@/lib/server/storage";
@@ -24,11 +25,18 @@ type SourceDocumentRecord = {
 };
 
 export async function GET(_request: Request, { params }: RouteContext) {
+  const auth = await getAuthenticatedUserOrUnauthorized(_request);
+
+  if (!auth.ok) {
+    return auth.response;
+  }
+
   const { id } = await params;
   const prisma = await getPrisma();
-  const document = (await prisma.studyDocument.findUnique({
+  const document = (await prisma.studyDocument.findFirst?.({
     where: {
-      id
+      id,
+      ownerId: auth.user.id
     },
     select: {
       id: true,
@@ -42,18 +50,18 @@ export async function GET(_request: Request, { params }: RouteContext) {
   })) as SourceDocumentRecord | null;
 
   if (!document) {
-    return NextResponse.json({ error: "Document not found." }, { status: 404 });
+    return privateJson({ error: "Document not found." }, { status: 404 });
   }
 
   if (toDocumentUploadStatus(document.uploadStatus) === DOCUMENT_UPLOAD_STATUS.DELETING) {
-    return NextResponse.json({ error: "Document deletion is in progress." }, { status: 409 });
+    return privateJson({ error: "Document deletion is in progress." }, { status: 409 });
   }
 
   const storage = getDocumentStorageForRecord(document);
 
   try {
     if (!(await storage.exists(document.storageObjectKey))) {
-      return NextResponse.json({ error: "Stored source PDF is missing." }, { status: 404 });
+      return privateJson({ error: "Stored source PDF is missing." }, { status: 404 });
     }
 
     const signedUrl = await storage.createSignedUrl(document.storageObjectKey, {
@@ -61,7 +69,9 @@ export async function GET(_request: Request, { params }: RouteContext) {
     });
 
     if (signedUrl) {
-      return NextResponse.redirect(signedUrl);
+      const response = NextResponse.redirect(signedUrl);
+      response.headers.set("Cache-Control", "private, no-store");
+      return response;
     }
 
     const buffer = await storage.readPdf(document.storageObjectKey);
@@ -76,6 +86,6 @@ export async function GET(_request: Request, { params }: RouteContext) {
       }
     });
   } catch {
-    return NextResponse.json({ error: "Could not open stored source PDF." }, { status: 500 });
+    return privateJson({ error: "Could not open stored source PDF." }, { status: 500 });
   }
 }

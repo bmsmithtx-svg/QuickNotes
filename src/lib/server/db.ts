@@ -1,6 +1,7 @@
 type PrismaDelegate = {
   findMany: (args?: unknown) => Promise<unknown[]>;
   findUnique: (args: unknown) => Promise<unknown | null>;
+  findFirst?: (args: unknown) => Promise<unknown | null>;
   create: (args: unknown) => Promise<unknown>;
   update: (args: unknown) => Promise<unknown>;
   createMany: (args: unknown) => Promise<unknown>;

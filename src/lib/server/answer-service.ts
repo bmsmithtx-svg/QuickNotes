@@ -50,6 +50,7 @@ const ANSWER_SCHEMA = {
 
 export type NormalizedAnswerRequest = {
   question: string;
+  ownerId?: string;
   documentIds?: string[];
   filters?: RetrievalFilters;
   mode: RetrievalMode;
@@ -128,6 +129,7 @@ export async function generateCitationBackedAnswer(
   );
   const retrievalInput: SearchChunksInput = {
     query: request.question,
+    ownerId: request.ownerId,
     filters,
     limit: request.topK
   };

@@ -32,7 +32,16 @@ describe("search index helpers", () => {
         calls.push({ query, values });
         assert.match(query, /to_tsvector\('english', chunk\."text"\)/);
         assert.match(query, /websearch_to_tsquery\('english', \$1\)/);
-        assert.deepEqual(values, ['"mitochondria" "atp"', "doc_1", "Biology", "cells", "exam", 5]);
+        assert.match(query, /"document"\."ownerId" = \$2::uuid/);
+        assert.deepEqual(values, [
+          '"mitochondria" "atp"',
+          "11111111-1111-4111-8111-111111111111",
+          "doc_1",
+          "Biology",
+          "cells",
+          "exam",
+          5
+        ]);
 
         return [
           {
@@ -56,6 +65,7 @@ describe("search index helpers", () => {
 
     const results = await searchChunks(db, {
       query: "mitochondria ATP",
+      ownerId: "11111111-1111-4111-8111-111111111111",
       documentId: "doc_1",
       className: "Biology",
       topic: "cells",

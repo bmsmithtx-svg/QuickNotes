@@ -9,6 +9,7 @@ describe("production environment validation", () => {
 
     assert.equal(config.storageProvider, "supabase");
     assert.equal(config.openAiApiKeyConfigured, true);
+    assert.equal(config.supabasePublishableKeyConfigured, true);
     assert.equal(config.embeddingDimensions, 1536);
     assert.equal(config.chatModel, "gpt-5-mini");
   });
@@ -19,6 +20,7 @@ describe("production environment validation", () => {
       (error) =>
         error instanceof EnvironmentValidationError &&
         error.issues.some((issue) => issue.includes("DATABASE_URL")) &&
+        error.issues.some((issue) => issue.includes("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY")) &&
         error.issues.some((issue) => issue.includes("SUPABASE_SERVICE_ROLE_KEY")) &&
         error.issues.some((issue) => issue.includes("OPENAI_API_KEY"))
     );
@@ -56,6 +58,20 @@ describe("production environment validation", () => {
         error.issues.some((issue) => issue.includes("OPENAI_EMBEDDING_DIMENSIONS"))
     );
   });
+
+  it("rejects mismatched public and server Supabase URLs", () => {
+    assert.throws(
+      () =>
+        validateProductionEnvironment(
+          createProductionEnv({
+            NEXT_PUBLIC_SUPABASE_URL: "https://other-project.supabase.co"
+          })
+        ),
+      (error) =>
+        error instanceof EnvironmentValidationError &&
+        error.issues.some((issue) => issue.includes("NEXT_PUBLIC_SUPABASE_URL must match SUPABASE_URL"))
+    );
+  });
 });
 
 function createProductionEnv(overrides: Record<string, string | undefined> = {}) {
@@ -69,6 +85,8 @@ function createProductionEnv(overrides: Record<string, string | undefined> = {})
     OPENAI_EMBEDDING_DIMENSIONS: "1536",
     OPENAI_CHAT_MODEL: "gpt-5-mini",
     QUICKNOTES_STORAGE_PROVIDER: "supabase",
+    NEXT_PUBLIC_SUPABASE_URL: "https://project-ref.supabase.co",
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
     SUPABASE_URL: "https://project-ref.supabase.co",
     SUPABASE_SERVICE_ROLE_KEY: "service-role",
     SUPABASE_STORAGE_BUCKET: "quicknotes-pdfs",

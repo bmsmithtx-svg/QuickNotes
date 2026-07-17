@@ -3,6 +3,7 @@ import { getAnswerRuntimeConfig } from "../src/lib/server/answer-config";
 import { getPrisma } from "../src/lib/server/db";
 import { getEmbeddingRuntimeConfig } from "../src/lib/server/embedding-config";
 import { validateEmbeddingStore } from "../src/lib/server/embedding-validation";
+import { authorizedRequest, createSmokeAuthContext } from "./smoke-auth";
 
 type JsonObject = Record<string, unknown>;
 
@@ -26,6 +27,10 @@ async function main() {
 
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
   const title = `QuickNotes Supabase Smoke ${stamp}`;
+  const authContext = await createSmokeAuthContext(1, `app-${stamp}`);
+  const accessToken = authContext.users[0].accessToken;
+
+  try {
   const formData = new FormData();
 
   formData.set(
@@ -44,6 +49,9 @@ async function main() {
   const upload = await jsonResponse(
     await uploadRoute.POST(
       new Request("http://quicknotes.local/api/documents/upload", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        },
         method: "POST",
         body: formData
       })
@@ -53,7 +61,7 @@ async function main() {
   assertStatus(upload, 201, "upload");
 
   const documentId = getString(upload.body, "documentId");
-  const list = await jsonResponse(await listRoute.GET());
+  const list = await jsonResponse(await listRoute.GET(authorizedRequest("http://quicknotes.local/api/documents/list", accessToken)));
 
   assertStatus(list, 200, "list documents");
   assertDocumentInList(list.body, documentId);
@@ -63,12 +71,14 @@ async function main() {
       id: documentId
     })
   };
-  const detail = await jsonResponse(await detailRoute.GET(new Request("http://quicknotes.local/api/documents"), context));
+  const detail = await jsonResponse(
+    await detailRoute.GET(authorizedRequest("http://quicknotes.local/api/documents", accessToken), context)
+  );
 
   assertStatus(detail, 200, "document detail");
 
   const content = await jsonResponse(
-    await contentRoute.GET(new Request(`http://quicknotes.local/api/documents/${documentId}/content`), context)
+    await contentRoute.GET(authorizedRequest(`http://quicknotes.local/api/documents/${documentId}/content`, accessToken), context)
   );
 
   assertStatus(content, 200, "document content");
@@ -76,7 +86,7 @@ async function main() {
 
   const metadata = await jsonResponse(
     await detailRoute.PATCH(
-      new Request(`http://quicknotes.local/api/documents/${documentId}`, {
+      authorizedRequest(`http://quicknotes.local/api/documents/${documentId}`, accessToken, {
         method: "PATCH",
         body: JSON.stringify({
           className: "Smoke Class Updated",
@@ -92,7 +102,9 @@ async function main() {
 
   assertStatus(metadata, 200, "metadata update");
 
-  const metadataOptions = await jsonResponse(await metadataOptionsRoute.GET());
+  const metadataOptions = await jsonResponse(
+    await metadataOptionsRoute.GET(authorizedRequest("http://quicknotes.local/api/documents/metadata-options", accessToken))
+  );
 
   assertStatus(metadataOptions, 200, "metadata options");
 
@@ -105,17 +117,17 @@ async function main() {
     dateTo: "2026-07-13"
   });
   const keyword = await jsonResponse(
-    await searchRoute.GET(new Request(`http://quicknotes.local/api/search?q=mitochondria&mode=keyword&${filterParams}`))
+    await searchRoute.GET(authorizedRequest(`http://quicknotes.local/api/search?q=mitochondria&mode=keyword&${filterParams}`, accessToken))
   );
 
   assertStatus(keyword, 200, "keyword search");
   assertSearchContainsDocument(keyword.body, documentId);
 
-  const semantic = await searchIfAvailable(searchRoute, "semantic", filterParams, documentId);
-  const hybrid = await searchIfAvailable(searchRoute, "hybrid", filterParams, documentId);
+  const semantic = await searchIfAvailable(searchRoute, "semantic", filterParams, documentId, accessToken);
+  const hybrid = await searchIfAvailable(searchRoute, "hybrid", filterParams, documentId, accessToken);
   const unsupportedAnswer = await jsonResponse(
     await answerRoute.POST(
-      new Request("http://quicknotes.local/api/answer", {
+      authorizedRequest("http://quicknotes.local/api/answer", accessToken, {
         method: "POST",
         body: JSON.stringify({
           question: "What is the capital of France?",
@@ -137,13 +149,18 @@ async function main() {
   assertStatus(unsupportedAnswer, 200, "not-found answer");
   assertEqual(getString(unsupportedAnswer.body, "status"), "insufficient_evidence", "not-found answer status");
 
-  const supportedAnswer = await answerIfAvailable(answerRoute, documentId);
+  const supportedAnswer = await answerIfAvailable(answerRoute, documentId, accessToken);
   const embeddingConfig = getEmbeddingRuntimeConfig();
   const prisma = await getPrisma();
   const embeddingValidation = await validateEmbeddingStore(prisma, {
     model: embeddingConfig.model,
     dimensions: embeddingConfig.dimensions
   });
+  const deleteResponse = await jsonResponse(
+    await detailRoute.DELETE(authorizedRequest(`http://quicknotes.local/api/documents/${documentId}`, accessToken, { method: "DELETE" }), context)
+  );
+
+  assertStatus(deleteResponse, 200, "document cleanup");
 
   await prisma.$disconnect?.();
 
@@ -193,22 +210,29 @@ async function main() {
         openai: {
           embeddingKeyConfigured: Boolean(embeddingConfig.apiKey),
           answerKeyConfigured: Boolean(getAnswerRuntimeConfig().apiKey)
+        },
+        cleanup: {
+          documentDeleted: true
         }
       },
       null,
       2
     )
   );
+  } finally {
+    await authContext.cleanup();
+  }
 }
 
 async function searchIfAvailable(
   searchRoute: typeof import("../src/app/api/search/route"),
   mode: "semantic" | "hybrid",
   filters: URLSearchParams,
-  documentId: string
+  documentId: string,
+  accessToken: string
 ) {
   const response = await jsonResponse(
-    await searchRoute.GET(new Request(`http://quicknotes.local/api/search?q=mitochondria&mode=${mode}&${filters}`))
+    await searchRoute.GET(authorizedRequest(`http://quicknotes.local/api/search?q=mitochondria&mode=${mode}&${filters}`, accessToken))
   );
 
   if (response.status === 200) {
@@ -231,10 +255,10 @@ async function searchIfAvailable(
   throw new Error(`${mode} search failed with HTTP ${response.status}: ${JSON.stringify(response.body)}`);
 }
 
-async function answerIfAvailable(answerRoute: typeof import("../src/app/api/answer/route"), documentId: string) {
+async function answerIfAvailable(answerRoute: typeof import("../src/app/api/answer/route"), documentId: string, accessToken: string) {
   const response = await jsonResponse(
     await answerRoute.POST(
-      new Request("http://quicknotes.local/api/answer", {
+      authorizedRequest("http://quicknotes.local/api/answer", accessToken, {
         method: "POST",
         body: JSON.stringify({
           question: "What do mitochondria make?",

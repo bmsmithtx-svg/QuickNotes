@@ -174,14 +174,25 @@ export async function getEmbeddingRowsByChunkIds(db: PrismaTransactionLike, chun
   );
 }
 
-export async function hasStoredEmbeddings(db: PrismaTransactionLike, model: string, dimensions?: number) {
+export async function hasStoredEmbeddings(db: PrismaTransactionLike, model: string, dimensions?: number, ownerId?: string) {
   const parameters: unknown[] = [];
   const modelParameter = addSqlParameter(parameters, model);
   const dimensionsFilter = dimensions
     ? ` AND "dimensions" = ${addSqlParameter(parameters, dimensions)}`
     : "";
+  const ownerFilter = ownerId?.trim()
+    ? ` AND document."ownerId" = ${addSqlParameter(parameters, ownerId.trim())}::uuid`
+    : "";
   const rows = await db.$queryRawUnsafe<Array<{ count: number | bigint }>>(
-    `SELECT COUNT(*) AS "count" FROM "DocumentChunkEmbedding" WHERE "embeddingModel" = ${modelParameter}${dimensionsFilter}`,
+    `
+      SELECT COUNT(*) AS "count"
+      FROM "DocumentChunkEmbedding" AS embedding
+      INNER JOIN "DocumentChunk" AS chunk
+        ON chunk."id" = embedding."chunkId"
+      INNER JOIN "StudyDocument" AS document
+        ON document."id" = chunk."documentId"
+      WHERE embedding."embeddingModel" = ${modelParameter}${dimensionsFilter}${ownerFilter}
+    `,
     ...parameters
   );
   const count = rows[0]?.count ?? 0;

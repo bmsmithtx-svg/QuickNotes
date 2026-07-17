@@ -95,15 +95,30 @@ describe("semantic retrieval", () => {
       semanticRows: [semanticRow("chunk_a", "doc_1", 1, 1, [1, 0], "Mitochondria make ATP.")]
     });
 
-    await searchSemanticChunks(db, { query: "ATP", limit: 3 }, embeddingService);
+    await searchSemanticChunks(
+      db,
+      {
+        query: "ATP",
+        ownerId: "11111111-1111-4111-8111-111111111111",
+        limit: 3
+      },
+      embeddingService
+    );
 
     const semanticQuery = seenQueries.find((query) => query.query.includes("DocumentChunkEmbedding"));
 
     assert.ok(semanticQuery);
     assert.match(semanticQuery.query, /embedding\."vector" <=> \$2::vector/);
     assert.match(semanticQuery.query, /embedding\."dimensions" = \$3/);
-    assert.match(semanticQuery.query, /LIMIT \$4/);
-    assert.deepEqual(semanticQuery.values, ["test-embedding", "[1,0]", 2, 3]);
+    assert.match(semanticQuery.query, /"document"\."ownerId" = \$4::uuid/);
+    assert.match(semanticQuery.query, /LIMIT \$5/);
+    assert.deepEqual(semanticQuery.values, [
+      "test-embedding",
+      "[1,0]",
+      2,
+      "11111111-1111-4111-8111-111111111111",
+      3
+    ]);
   });
 
   it("applies shared metadata filters before semantic ranking", async () => {
@@ -117,6 +132,7 @@ describe("semantic retrieval", () => {
       db,
       {
         query: "ATP",
+        ownerId: "11111111-1111-4111-8111-111111111111",
         filters: {
           classNames: ["Biology"],
           topics: ["cells"],
@@ -132,12 +148,14 @@ describe("semantic retrieval", () => {
     const semanticQuery = seenQueries.find((query) => query.query.includes("DocumentChunkEmbedding"));
 
     assert.ok(semanticQuery);
-    assert.match(semanticQuery.query, /"document"\."className" = \$4/);
-    assert.match(semanticQuery.query, /"filterTag"\."normalizedName" IN \(\$8\)/);
-    assert.deepEqual(semanticQuery.values.slice(0, 6), [
+    assert.match(semanticQuery.query, /"document"\."ownerId" = \$4::uuid/);
+    assert.match(semanticQuery.query, /"document"\."className" = \$5/);
+    assert.match(semanticQuery.query, /"filterTag"\."normalizedName" IN \(\$9\)/);
+    assert.deepEqual(semanticQuery.values.slice(0, 7), [
       "test-embedding",
       "[1,0]",
       2,
+      "11111111-1111-4111-8111-111111111111",
       "Biology",
       "cells",
       "2026-07-01"
@@ -197,6 +215,7 @@ describe("hybrid retrieval", () => {
       db,
       {
         query: "ATP",
+        ownerId: "11111111-1111-4111-8111-111111111111",
         filters: {
           documentIds: ["doc_1"],
           sources: ["Course notes"],
@@ -213,8 +232,10 @@ describe("hybrid retrieval", () => {
 
     for (const query of retrievalQueries) {
       assert.match(query.query, /"document"\."id" = \$\d+/);
+      assert.match(query.query, /"document"\."ownerId" = \$\d+::uuid/);
       assert.match(query.query, /"document"\."source" = \$\d+/);
       assert.match(query.query, /"filterTag"\."normalizedName" IN \(\$\d+\)/);
+      assert.ok(query.values.includes("11111111-1111-4111-8111-111111111111"));
       assert.ok(query.values.includes("doc_1"));
       assert.ok(query.values.includes("Course notes"));
       assert.ok(query.values.includes("exam"));

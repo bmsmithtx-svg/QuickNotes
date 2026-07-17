@@ -27,14 +27,14 @@ describe("metadata option aggregation", () => {
   });
 
   it("queries classes, topics, sources, and normalized tags", async () => {
-    const queries: string[] = [];
+    const queries: Array<{ query: string; values: unknown[] }> = [];
     const db: PrismaTransactionLike = {
       studyDocument: delegate,
       documentPage: delegate,
       documentChunk: delegate,
       $executeRawUnsafe: async () => 0,
-      $queryRawUnsafe: async <Result = unknown>(query: string) => {
-        queries.push(query);
+      $queryRawUnsafe: async <Result = unknown>(query: string, ...values: unknown[]) => {
+        queries.push({ query, values });
 
         if (query.includes('"className"')) {
           return [{ value: "Biology", count: 2 }] as Result;
@@ -52,13 +52,15 @@ describe("metadata option aggregation", () => {
       }
     };
 
-    const options = await getMetadataOptions(db);
+    const options = await getMetadataOptions(db, "11111111-1111-4111-8111-111111111111");
 
     assert.deepEqual(options.classes, [{ value: "Biology", count: 2 }]);
     assert.deepEqual(options.topics, [{ value: "Regression", count: 3 }]);
     assert.deepEqual(options.sources, [{ value: "Course notes", count: 4 }]);
     assert.deepEqual(options.tags, [{ value: "exam-2", count: 1 }]);
     assert.equal(queries.length, 4);
-    assert.match(queries[3], /COUNT\(DISTINCT "documentTag"\."documentId"\)/);
+    assert.ok(queries.every((entry) => entry.query.includes('"ownerId"')));
+    assert.ok(queries.every((entry) => entry.values.includes("11111111-1111-4111-8111-111111111111")));
+    assert.match(queries[3].query, /COUNT\(DISTINCT "documentTag"\."documentId"\)/);
   });
 });

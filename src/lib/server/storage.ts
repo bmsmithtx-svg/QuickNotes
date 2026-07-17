@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -7,6 +7,7 @@ export const LOCAL_STORAGE_ROOT = path.join(process.cwd(), "storage");
 export const PDF_UPLOAD_DIR = path.join(LOCAL_STORAGE_ROOT, "uploads");
 export const EXTRACTED_DATA_DIR = path.join(LOCAL_STORAGE_ROOT, "extracted");
 export const DOCUMENT_SOURCE_PREFIX = "documents";
+export const SOURCE_PDF_FILE_NAME = "source.pdf";
 export const DEFAULT_LOCAL_STORAGE_BUCKET = "local";
 export const SIGNED_SOURCE_URL_TTL_SECONDS = 60;
 
@@ -173,8 +174,12 @@ export async function ensureConfiguredStorage(env: NodeJS.ProcessEnv = process.e
   return ensureSupabaseStorageBucket(getSupabaseStorageConfig(env));
 }
 
-export function createPdfObjectKey() {
-  return `${DOCUMENT_SOURCE_PREFIX}/${randomUUID()}.pdf`;
+export function createPdfObjectKey(ownerId: string, documentId: string) {
+  return `${toSafeStoragePathSegment(ownerId, "ownerId")}/${toSafeStoragePathSegment(documentId, "documentId")}/${SOURCE_PDF_FILE_NAME}`;
+}
+
+export function isOwnerScopedPdfObjectKey(key: string, ownerId: string, documentId: string) {
+  return validateStorageObjectKey(key) === createPdfObjectKey(ownerId, documentId);
 }
 
 export function sha256Hex(buffer: Buffer) {
@@ -485,8 +490,20 @@ class SupabaseDocumentStorage implements DocumentStorageAdapter {
   }
 
   async listObjects(options: ListStorageObjectsOptions = {}) {
-    const prefix = options.prefix ?? DOCUMENT_SOURCE_PREFIX;
+    const prefix = normalizeListPrefix(options.prefix ?? DOCUMENT_SOURCE_PREFIX);
     const limit = options.limit ?? 1000;
+    const results: StorageObjectMetadata[] = [];
+
+    await this.collectObjects(prefix, limit, results);
+
+    return results.slice(0, limit);
+  }
+
+  private async collectObjects(prefix: string, limit: number, results: StorageObjectMetadata[]) {
+    if (results.length >= limit) {
+      return;
+    }
+
     const response = await this.client.fetchStoragePath(`/object/list/${this.client.encodedBucket}`, {
       method: "POST",
       headers: {
@@ -494,7 +511,7 @@ class SupabaseDocumentStorage implements DocumentStorageAdapter {
       },
       body: JSON.stringify({
         prefix,
-        limit,
+        limit: Math.min(limit, 1000),
         offset: 0,
         sortBy: {
           column: "name",
@@ -506,6 +523,7 @@ class SupabaseDocumentStorage implements DocumentStorageAdapter {
     await ensureOk(response, `list objects in ${this.bucket}`);
 
     const body = (await response.json()) as Array<{
+      id?: string | null;
       name?: string;
       updated_at?: string | null;
       metadata?: {
@@ -514,9 +532,23 @@ class SupabaseDocumentStorage implements DocumentStorageAdapter {
       } | null;
     }>;
 
-    return body
-      .map((item) => mapSupabaseListedObject(prefix, item))
-      .filter((item): item is StorageObjectMetadata => Boolean(item?.key));
+    for (const item of body) {
+      const object = mapSupabaseListedObject(prefix, item);
+
+      if (!object) {
+        continue;
+      }
+
+      if (isSupabaseFolderItem(item)) {
+        await this.collectObjects(object.key, limit, results);
+      } else {
+        results.push(object);
+      }
+
+      if (results.length >= limit) {
+        return;
+      }
+    }
   }
 }
 
@@ -634,8 +666,22 @@ function requireEnv(env: NodeJS.ProcessEnv, name: string) {
   return value;
 }
 
+function toSafeStoragePathSegment(value: string, fieldName: string) {
+  const normalized = value.trim();
+
+  if (!normalized || normalized.includes("/") || normalized.includes("\\") || normalized === "." || normalized === "..") {
+    throw new Error(`${fieldName} must be a single storage path segment.`);
+  }
+
+  return normalized;
+}
+
 function encodeObjectKey(key: string) {
   return key.split("/").map(encodeURIComponent).join("/");
+}
+
+function normalizeListPrefix(prefix: string) {
+  return prefix.replace(/^\/+|\/+$/g, "");
 }
 
 function isFileMissingError(error: unknown) {
@@ -679,6 +725,7 @@ function mapSupabaseListedObject(
   prefix: string,
   item: {
     name?: string;
+    id?: string | null;
     updated_at?: string | null;
     metadata?: {
       size?: number | null;
@@ -699,4 +746,14 @@ function mapSupabaseListedObject(
     contentType: item.metadata?.mimetype ?? null,
     updatedAt: item.updated_at ?? null
   };
+}
+
+function isSupabaseFolderItem(item: {
+  id?: string | null;
+  metadata?: {
+    size?: number | null;
+    mimetype?: string | null;
+  } | null;
+}) {
+  return !item.id && !item.metadata?.mimetype && item.metadata?.size == null;
 }

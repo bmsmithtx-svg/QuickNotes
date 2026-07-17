@@ -10,6 +10,7 @@ datasource db {
 
 model StudyDocument {
   id                     String          @id @default(cuid())
+  ownerId                String          @db.Uuid
   originalFileName       String          @db.Text
   storedFileName         String          @unique
   fileSize               Int
@@ -41,6 +42,14 @@ model StudyDocument {
   tagLinks               DocumentTag[]
 
   @@unique([storageProvider, storageBucket, storageObjectKey])
+  @@index([ownerId, createdAt])
+  @@index([ownerId, uploadStatus, createdAt])
+  @@index([ownerId, className])
+  @@index([ownerId, topic])
+  @@index([ownerId, source])
+  @@index([ownerId, documentDate])
+  @@index([ownerId, contentSha256])
+  @@index([ownerId, storageProvider, storageBucket, storageObjectKey])
   @@index([createdAt])
   @@index([uploadStatus])
   @@index([storageProvider])
@@ -100,12 +109,15 @@ model DocumentChunkEmbedding {
 
 model Tag {
   id             String        @id @default(cuid())
+  ownerId        String        @db.Uuid
   name           String
-  normalizedName String        @unique
+  normalizedName String
   createdAt      DateTime      @default(now()) @db.Timestamptz(6)
   updatedAt      DateTime      @updatedAt @db.Timestamptz(6)
   documents      DocumentTag[]
 
+  @@unique([ownerId, normalizedName])
+  @@index([ownerId, name])
   @@index([name])
 }
 

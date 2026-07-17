@@ -85,6 +85,7 @@ describe("retrieval filter contract", () => {
     assert.match(clauses.join(" AND "), /"document"\."source" = \$6/);
     assert.match(clauses.join(" AND "), /"document"\."documentDate" >= \$7::date/);
     assert.match(clauses.join(" AND "), /"document"\."documentDate" <= \$8::date/);
+    assert.match(clauses.join(" AND "), /"filterTag"\."ownerId" = "document"\."ownerId"/);
     assert.match(clauses.join(" AND "), /"filterTag"\."normalizedName" IN \(\$9, \$10\)/);
     assert.deepEqual(parameters.slice(0, 6), ["doc_a", "doc_b", "Biology", "Chemistry", "cells", "Course notes"]);
     assert.equal(parameters.at(-2), "exam");
@@ -127,12 +128,28 @@ describe("document tag writes", () => {
       }
     };
 
-    await replaceDocumentTags(transaction, "doc_1", normalizeTagsInput(["Exam", "exam", "week 3"]));
+    await replaceDocumentTags(transaction, "doc_1", "11111111-1111-4111-8111-111111111111", normalizeTagsInput(["Exam", "exam", "week 3"]));
 
     assert.deepEqual(
       calls.map((call) => call.method),
       ["deleteMany", "upsertTag", "createDocumentTag", "upsertTag", "createDocumentTag"]
     );
+    assert.deepEqual(calls[1].args, {
+      where: {
+        ownerId_normalizedName: {
+          ownerId: "11111111-1111-4111-8111-111111111111",
+          normalizedName: "exam"
+        }
+      },
+      update: {
+        name: "Exam"
+      },
+      create: {
+        ownerId: "11111111-1111-4111-8111-111111111111",
+        name: "Exam",
+        normalizedName: "exam"
+      }
+    });
   });
 
   it("does not issue a deleteMany when the document id is empty", async () => {
@@ -150,7 +167,7 @@ describe("document tag writes", () => {
       }
     };
 
-    await assert.rejects(() => replaceDocumentTags(transaction, " ", []), /documentId is required/);
+    await assert.rejects(() => replaceDocumentTags(transaction, " ", "11111111-1111-4111-8111-111111111111", []), /documentId is required/);
     assert.equal(deleteCalled, false);
   });
 });

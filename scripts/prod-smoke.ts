@@ -4,6 +4,7 @@ import { getPrisma, type PrismaClientLike } from "../src/lib/server/db";
 import { getEmbeddingRuntimeConfig } from "../src/lib/server/embedding-config";
 import { deleteStoredDocument, DOCUMENT_UPLOAD_STATUS } from "../src/lib/server/document-lifecycle";
 import { getDocumentStorageForRecord, ensureConfiguredStorage } from "../src/lib/server/storage";
+import { authorizedRequest, createSmokeAuthContext, type SmokeAuthContext } from "./smoke-auth";
 
 type JsonObject = Record<string, unknown>;
 
@@ -15,6 +16,7 @@ type SmokeDocumentRecord = {
   storageProvider: string;
   storageBucket: string;
   storageObjectKey: string;
+  ownerId: string;
   storageConfirmedAt: Date | string | null;
   processingCompletedAt: Date | string | null;
 };
@@ -43,6 +45,7 @@ async function main() {
   const prisma = await getPrisma();
   let documentId: string | null = null;
   let deleted = false;
+  let authContext: SmokeAuthContext | null = null;
 
   try {
     await assertDatabaseConnectivity(prisma);
@@ -54,10 +57,13 @@ async function main() {
     const documentRoute = await import("../src/app/api/documents/[id]/route");
 
     const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+    authContext = await createSmokeAuthContext(2, `prod-${stamp}`);
+    const userA = authContext.users[0];
+    const userB = authContext.users[1];
     const title = `QuickNotes Production Smoke ${stamp}`;
     const upload = await jsonResponse(
       await uploadRoute.POST(
-        new Request("http://quicknotes.local/api/documents/upload", {
+        authorizedRequest("http://quicknotes.local/api/documents/upload", userA.accessToken, {
           method: "POST",
           body: createSmokeFormData(stamp, title)
         })
@@ -72,6 +78,7 @@ async function main() {
     const document = await getSmokeDocument(prisma, documentId);
 
     assertEqual(document.uploadStatus, DOCUMENT_UPLOAD_STATUS.READY, "persisted upload status");
+    assertEqual(document.ownerId, userA.id, "persisted owner id");
     assertEqual(document.storageProvider, "supabase", "persisted storage provider");
     assertTruthy(document.storageConfirmedAt, "storage confirmation timestamp");
     assertTruthy(document.processingCompletedAt, "processing completion timestamp");
@@ -82,11 +89,14 @@ async function main() {
       throw new Error("Stored smoke PDF object does not exist.");
     }
 
-    const source = await sourceRoute.GET(new Request(`http://quicknotes.local/api/documents/${documentId}/source`), {
-      params: Promise.resolve({
-        id: documentId
-      })
-    });
+    const source = await sourceRoute.GET(
+      authorizedRequest(`http://quicknotes.local/api/documents/${documentId}/source`, userA.accessToken),
+      {
+        params: Promise.resolve({
+          id: documentId
+        })
+      }
+    );
     const signedLocation = source.headers.get("location");
 
     if (source.status < 300 || source.status >= 400 || !signedLocation) {
@@ -116,12 +126,24 @@ async function main() {
       dateFrom: "2026-07-15",
       dateTo: "2026-07-15"
     });
-    const keyword = await searchAndAssert(searchRoute, "keyword", filterParams, documentId);
-    const semantic = await searchAndAssert(searchRoute, "semantic", filterParams, documentId);
-    const hybrid = await searchAndAssert(searchRoute, "hybrid", filterParams, documentId);
-    const answer = await answerAndAssert(answerRoute, documentId);
+    const keyword = await searchAndAssert(searchRoute, "keyword", filterParams, documentId, userA.accessToken);
+    const semantic = await searchAndAssert(searchRoute, "semantic", filterParams, documentId, userA.accessToken);
+    const hybrid = await searchAndAssert(searchRoute, "hybrid", filterParams, documentId, userA.accessToken);
+    const answer = await answerAndAssert(answerRoute, documentId, userA.accessToken);
+    const crossUser = await assertCrossUserIsolation({
+      listRoute: await import("../src/app/api/documents/list/route"),
+      detailRoute: documentRoute,
+      sourceRoute,
+      retryRoute: await import("../src/app/api/documents/[id]/retry/route"),
+      searchRoute,
+      answerRoute,
+      documentRoute,
+      documentId,
+      filters: filterParams,
+      accessToken: userB.accessToken
+    });
     const deleteResponse = await jsonResponse(
-      await documentRoute.DELETE(new Request(`http://quicknotes.local/api/documents/${documentId}`, { method: "DELETE" }), {
+      await documentRoute.DELETE(authorizedRequest(`http://quicknotes.local/api/documents/${documentId}`, userA.accessToken, { method: "DELETE" }), {
         params: Promise.resolve({
           id: documentId
         })
@@ -174,6 +196,10 @@ async function main() {
             hybrid
           },
           answer,
+          auth: {
+            testUsersCreated: 2,
+            crossUserIsolationVerified: crossUser.verified
+          },
           cleanup: {
             documentDeleted: true,
             storageObjectDeleted: true
@@ -188,6 +214,7 @@ async function main() {
       await cleanupSmokeDocument(prisma, documentId);
     }
 
+    await authContext?.cleanup();
     await prisma.$disconnect?.();
   }
 }
@@ -213,6 +240,7 @@ async function getSmokeDocument(prisma: PrismaClientLike, documentId: string) {
       storageProvider: true,
       storageBucket: true,
       storageObjectKey: true,
+      ownerId: true,
       storageConfirmedAt: true,
       processingCompletedAt: true
     }
@@ -258,10 +286,11 @@ async function searchAndAssert(
   searchRoute: typeof import("../src/app/api/search/route"),
   mode: "keyword" | "semantic" | "hybrid",
   filters: URLSearchParams,
-  documentId: string
+  documentId: string,
+  accessToken: string
 ) {
   const response = await jsonResponse(
-    await searchRoute.GET(new Request(`http://quicknotes.local/api/search?q=mitochondria%20ATP&mode=${mode}&${filters}`))
+    await searchRoute.GET(authorizedRequest(`http://quicknotes.local/api/search?q=mitochondria%20ATP&mode=${mode}&${filters}`, accessToken))
   );
 
   assertStatus(response, 200, `${mode} search`);
@@ -273,10 +302,10 @@ async function searchAndAssert(
   };
 }
 
-async function answerAndAssert(answerRoute: typeof import("../src/app/api/answer/route"), documentId: string) {
+async function answerAndAssert(answerRoute: typeof import("../src/app/api/answer/route"), documentId: string, accessToken: string) {
   const response = await jsonResponse(
     await answerRoute.POST(
-      new Request("http://quicknotes.local/api/answer", {
+      authorizedRequest("http://quicknotes.local/api/answer", accessToken, {
         method: "POST",
         body: JSON.stringify({
           question: "What does the production smoke document say mitochondria make?",
@@ -324,6 +353,104 @@ async function answerAndAssert(answerRoute: typeof import("../src/app/api/answer
     status: "answered",
     citationCount: citations.length,
     citationGroundingVerified: true
+  };
+}
+
+async function assertCrossUserIsolation({
+  listRoute,
+  detailRoute,
+  sourceRoute,
+  retryRoute,
+  searchRoute,
+  answerRoute,
+  documentRoute,
+  documentId,
+  filters,
+  accessToken
+}: {
+  listRoute: typeof import("../src/app/api/documents/list/route");
+  detailRoute: typeof import("../src/app/api/documents/[id]/route");
+  sourceRoute: typeof import("../src/app/api/documents/[id]/source/route");
+  retryRoute: typeof import("../src/app/api/documents/[id]/retry/route");
+  searchRoute: typeof import("../src/app/api/search/route");
+  answerRoute: typeof import("../src/app/api/answer/route");
+  documentRoute: typeof import("../src/app/api/documents/[id]/route");
+  documentId: string;
+  filters: URLSearchParams;
+  accessToken: string;
+}) {
+  const context = {
+    params: Promise.resolve({
+      id: documentId
+    })
+  };
+  const list = await jsonResponse(await listRoute.GET(authorizedRequest("http://quicknotes.local/api/documents/list", accessToken)));
+
+  assertStatus(list, 200, "cross-user list");
+
+  if (Array.isArray(list.body.documents) && list.body.documents.some((document) => isObjectWithString(document, "id", documentId))) {
+    throw new Error("Cross-user list disclosed another user's document.");
+  }
+
+  const detail = await jsonResponse(
+    await detailRoute.GET(authorizedRequest(`http://quicknotes.local/api/documents/${documentId}`, accessToken), context)
+  );
+  assertStatus(detail, 404, "cross-user detail");
+
+  const source = await jsonResponse(
+    await sourceRoute.GET(authorizedRequest(`http://quicknotes.local/api/documents/${documentId}/source`, accessToken), context)
+  );
+  assertStatus(source, 404, "cross-user source");
+
+  const retry = await jsonResponse(
+    await retryRoute.POST(authorizedRequest(`http://quicknotes.local/api/documents/${documentId}/retry`, accessToken, { method: "POST" }), context)
+  );
+  assertStatus(retry, 404, "cross-user retry");
+
+  const keyword = await jsonResponse(
+    await searchRoute.GET(authorizedRequest(`http://quicknotes.local/api/search?q=mitochondria%20ATP&mode=keyword&${filters}`, accessToken))
+  );
+  assertStatus(keyword, 200, "cross-user keyword search");
+
+  if (Array.isArray(keyword.body.results) && keyword.body.results.some((result) => isObjectWithString(result, "documentId", documentId))) {
+    throw new Error("Cross-user search returned another user's document.");
+  }
+
+  const answer = await jsonResponse(
+    await answerRoute.POST(
+      authorizedRequest("http://quicknotes.local/api/answer", accessToken, {
+        method: "POST",
+        body: JSON.stringify({
+          question: "What does the production smoke document say mitochondria make?",
+          mode: "keyword",
+          topK: 5,
+          filters: {
+            documentIds: [documentId],
+            classNames: ["Production Smoke"],
+            topics: ["Persistence"],
+            sources: ["QuickNotes production smoke"],
+            tags: ["production-smoke"],
+            documentDateFrom: "2026-07-15",
+            documentDateTo: "2026-07-15"
+          }
+        })
+      })
+    )
+  );
+  assertStatus(answer, 200, "cross-user answer");
+  assertEqual(getString(answer.body, "status"), "insufficient_evidence", "cross-user answer status");
+
+  if (Array.isArray(answer.body.citations) && answer.body.citations.length > 0) {
+    throw new Error("Cross-user answer returned citations for another user's document.");
+  }
+
+  const deletion = await jsonResponse(
+    await documentRoute.DELETE(authorizedRequest(`http://quicknotes.local/api/documents/${documentId}`, accessToken, { method: "DELETE" }), context)
+  );
+  assertStatus(deletion, 404, "cross-user deletion");
+
+  return {
+    verified: true
   };
 }
 

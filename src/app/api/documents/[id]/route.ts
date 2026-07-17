@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-
+import { getAuthenticatedUserOrUnauthorized, privateJson } from "@/lib/server/auth";
 import {
   DOCUMENT_UPLOAD_STATUS,
   DocumentLifecycleError,
@@ -29,37 +28,50 @@ type RouteContext = {
 };
 
 export async function GET(_request: Request, { params }: RouteContext) {
+  const auth = await getAuthenticatedUserOrUnauthorized(_request);
+
+  if (!auth.ok) {
+    return auth.response;
+  }
+
   const { id } = await params;
   const prisma = await getPrisma();
-  const document = (await prisma.studyDocument.findUnique({
+  const document = (await prisma.studyDocument.findFirst?.({
     where: {
-      id
+      id,
+      ownerId: auth.user.id
     },
     include: getDocumentInclude()
   })) as DocumentWithCounts | null;
 
   if (!document) {
-    return NextResponse.json({ error: "Document not found." }, { status: 404 });
+    return privateJson({ error: "Document not found." }, { status: 404 });
   }
 
-  return NextResponse.json({
+  return privateJson({
     document: mapStudyDocumentDetail(document)
   });
 }
 
 export async function PATCH(request: Request, { params }: RouteContext) {
+  const auth = await getAuthenticatedUserOrUnauthorized(request);
+
+  if (!auth.ok) {
+    return auth.response;
+  }
+
   let payload: unknown;
 
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
+    return privateJson({ error: "Request body must be valid JSON." }, { status: 400 });
   }
 
   const parsed = parseDocumentMetadataUpdatePayload(payload);
 
   if (!parsed.ok) {
-    return NextResponse.json({ error: parsed.error }, { status: 400 });
+    return privateJson({ error: parsed.error }, { status: 400 });
   }
 
   const { id } = await params;
@@ -67,12 +79,14 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
   try {
     const document = await prisma.$transaction(async (transaction) => {
-      const existing = await transaction.studyDocument.findUnique({
+      const existing = await transaction.studyDocument.findFirst?.({
         where: {
-          id
+          id,
+          ownerId: auth.user.id
         },
         select: {
-          id: true
+          id: true,
+          ownerId: true
         }
       });
 
@@ -88,42 +102,54 @@ export async function PATCH(request: Request, { params }: RouteContext) {
       });
 
       if (parsed.value.tags) {
-        await replaceDocumentTags(transaction as unknown as MetadataTagTransaction, id, parsed.value.tags);
+        await replaceDocumentTags(transaction as unknown as MetadataTagTransaction, id, auth.user.id, parsed.value.tags);
       }
 
-      return (await transaction.studyDocument.findUnique({
+      return (await transaction.studyDocument.findFirst?.({
         where: {
-          id
+          id,
+          ownerId: auth.user.id
         },
         include: getDocumentInclude()
       })) as DocumentWithCounts | null;
     });
 
     if (!document) {
-      return NextResponse.json({ error: "Document not found." }, { status: 404 });
+      return privateJson({ error: "Document not found." }, { status: 404 });
     }
 
-    return NextResponse.json({
+    return privateJson({
       document: mapStudyDocumentDetail(document)
     });
   } catch {
-    return NextResponse.json({ error: "Document metadata update failed." }, { status: 500 });
+    return privateJson({ error: "Document metadata update failed." }, { status: 500 });
   }
 }
 
 export async function DELETE(_request: Request, { params }: RouteContext) {
+  const auth = await getAuthenticatedUserOrUnauthorized(_request);
+
+  if (!auth.ok) {
+    return auth.response;
+  }
+
   const { id } = await params;
   const prisma = await getPrisma();
 
   try {
     const result = await deleteStoredDocument({
       prisma,
-      documentId: id
+      documentId: id,
+      ownerId: auth.user.id
     });
 
-    return NextResponse.json(result);
+    if (result.status === "missing") {
+      return privateJson({ error: "Document not found." }, { status: 404 });
+    }
+
+    return privateJson(result);
   } catch (error) {
-    return NextResponse.json(
+    return privateJson(
       {
         documentId: id,
         error:

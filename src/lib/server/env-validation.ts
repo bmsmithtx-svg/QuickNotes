@@ -6,6 +6,8 @@ export type ProductionEnvironmentConfig = {
   embeddingDimensions: number;
   chatModel: string;
   storageProvider: "supabase";
+  supabasePublicUrl: string;
+  supabasePublishableKeyConfigured: true;
   supabaseUrl: string;
   supabaseStorageBucket: string;
 };
@@ -30,6 +32,8 @@ const REQUIRED_PRODUCTION_ENV = [
   "OPENAI_EMBEDDING_DIMENSIONS",
   "OPENAI_CHAT_MODEL",
   "QUICKNOTES_STORAGE_PROVIDER",
+  "NEXT_PUBLIC_SUPABASE_URL",
+  "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   "SUPABASE_URL",
   "SUPABASE_SERVICE_ROLE_KEY",
   "SUPABASE_STORAGE_BUCKET"
@@ -50,6 +54,7 @@ export function validateProductionEnvironment(env: EnvLike = process.env): Produ
 
   const databaseUrl = normalizeEnvValue(env.DATABASE_URL);
   const directUrl = normalizeEnvValue(env.DIRECT_URL);
+  const supabasePublicUrl = normalizeEnvValue(env.NEXT_PUBLIC_SUPABASE_URL);
   const supabaseUrl = normalizeEnvValue(env.SUPABASE_URL);
   const storageProvider = normalizeEnvValue(env.QUICKNOTES_STORAGE_PROVIDER)?.toLowerCase();
   const embeddingDimensionsValue = normalizeEnvValue(env.OPENAI_EMBEDDING_DIMENSIONS);
@@ -69,8 +74,16 @@ export function validateProductionEnvironment(env: EnvLike = process.env): Produ
     }, issues);
   }
 
+  if (supabasePublicUrl) {
+    validateSupabaseProjectUrl("NEXT_PUBLIC_SUPABASE_URL", supabasePublicUrl, issues);
+  }
+
   if (supabaseUrl) {
-    validateSupabaseProjectUrl(supabaseUrl, issues);
+    validateSupabaseProjectUrl("SUPABASE_URL", supabaseUrl, issues);
+  }
+
+  if (supabasePublicUrl && supabaseUrl && normalizeSupabaseUrl(supabasePublicUrl) !== normalizeSupabaseUrl(supabaseUrl)) {
+    issues.push("NEXT_PUBLIC_SUPABASE_URL must match SUPABASE_URL.");
   }
 
   if (storageProvider && storageProvider !== "supabase") {
@@ -93,6 +106,8 @@ export function validateProductionEnvironment(env: EnvLike = process.env): Produ
     embeddingDimensions: embeddingDimensions as number,
     chatModel: normalizeEnvValue(env.OPENAI_CHAT_MODEL) as string,
     storageProvider: "supabase",
+    supabasePublicUrl: normalizeEnvValue(env.NEXT_PUBLIC_SUPABASE_URL) as string,
+    supabasePublishableKeyConfigured: true,
     supabaseUrl: normalizeEnvValue(env.SUPABASE_URL) as string,
     supabaseStorageBucket: normalizeEnvValue(env.SUPABASE_STORAGE_BUCKET) as string
   };
@@ -133,23 +148,27 @@ function validatePostgresUrl(
   }
 }
 
-function validateSupabaseProjectUrl(value: string, issues: string[]) {
+function validateSupabaseProjectUrl(name: string, value: string, issues: string[]) {
   let url: URL;
 
   try {
     url = new URL(value);
   } catch {
-    issues.push("SUPABASE_URL must be a valid URL.");
+    issues.push(`${name} must be a valid URL.`);
     return;
   }
 
   if (url.protocol !== "https:") {
-    issues.push("SUPABASE_URL must use https://.");
+    issues.push(`${name} must use https://.`);
   }
 
   if (!url.hostname.includes("supabase")) {
-    issues.push("SUPABASE_URL must point at a Supabase project.");
+    issues.push(`${name} must point at a Supabase project.`);
   }
+}
+
+function normalizeSupabaseUrl(value: string) {
+  return value.replace(/\/+$/, "");
 }
 
 function parsePositiveInteger(value: string | null) {
