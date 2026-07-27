@@ -4,9 +4,12 @@ import { describe, it } from "node:test";
 import type { DocumentContentResponse, StudyDocumentSummary } from "../lib/types";
 import {
   applySavedDocumentToWorkspaceState,
+  formatUploadLimitError,
+  getUploadFailureMessage,
   getMetadataPanelState,
   getWorkspaceTabHref,
   normalizeWorkspaceTab,
+  readApiResponse,
   resolveSelectedDocumentIdAfterLoad
 } from "./quicknotes-workspace";
 
@@ -61,6 +64,36 @@ describe("workspace metadata state", () => {
     assert.equal(nextState.documents[1], otherDocument);
     assert.equal(nextState.content?.document.title, "Updated");
     assert.equal(nextState.content?.document.source, "Textbook");
+  });
+});
+
+describe("workspace API response handling", () => {
+  it("reads plain-text API failures without throwing JSON parse errors", async () => {
+    const response = new Response("Request Entity Too Large", {
+      status: 413,
+      headers: {
+        "Content-Type": "text/plain"
+      }
+    });
+
+    const payload = await readApiResponse(response);
+
+    assert.equal(payload.error, "Request Entity Too Large");
+  });
+
+  it("formats upload size limit errors with the selected file size", () => {
+    assert.equal(
+      formatUploadLimitError(6.4 * 1024 * 1024, 4 * 1024 * 1024),
+      "PDF uploads are limited to 4.0 MB for this deployment. This file is 6.4 MB."
+    );
+    assert.equal(
+      getUploadFailureMessage(413, "Request Entity Too Large", 6.4 * 1024 * 1024, 4 * 1024 * 1024),
+      "PDF uploads are limited to 4.0 MB for this deployment. This file is 6.4 MB."
+    );
+    assert.equal(
+      getUploadFailureMessage(413, "PDF uploads are limited to 4 MB for this deployment.", 6.4 * 1024 * 1024, null),
+      "PDF uploads are limited to 4 MB for this deployment. This file is 6.4 MB."
+    );
   });
 });
 

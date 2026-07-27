@@ -176,6 +176,57 @@ describe("document storage adapters", () => {
     }
   });
 
+  it("creates Supabase signed upload URLs for owner-scoped direct uploads", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        init: init ?? {}
+      });
+
+      return new Response(
+        JSON.stringify({
+          url: "/object/upload/sign/private/owner-id/document-id/source.pdf?token=upload-token"
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }) as typeof fetch;
+
+    try {
+      const storage = createDocumentStorage({
+        provider: "supabase",
+        bucket: "private",
+        supabaseUrl: "https://example.supabase.co",
+        serviceRoleKey: "service-role-secret"
+      });
+      const signedUpload = await storage.createSignedUploadUrl?.("owner-id/document-id/source.pdf");
+
+      assert.deepEqual(signedUpload, {
+        key: "owner-id/document-id/source.pdf",
+        path: "owner-id/document-id/source.pdf",
+        signedUrl: "https://example.supabase.co/storage/v1/object/upload/sign/private/owner-id/document-id/source.pdf?token=upload-token",
+        token: "upload-token"
+      });
+      assert.equal(calls.length, 1);
+      assert.equal(
+        calls[0].url,
+        "https://example.supabase.co/storage/v1/object/upload/sign/private/owner-id/document-id/source.pdf"
+      );
+      assert.equal(calls[0].init.method, "POST");
+      assert.equal(new Headers(calls[0].init.headers).get("Authorization"), "Bearer service-role-secret");
+      assert.equal(new Headers(calls[0].init.headers).get("apikey"), "service-role-secret");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("recursively lists Supabase owner-scoped PDFs without reporting folder prefixes as objects", async () => {
     const prefixes: string[] = [];
     const originalFetch = globalThis.fetch;

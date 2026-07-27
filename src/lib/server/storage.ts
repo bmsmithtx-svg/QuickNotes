@@ -42,6 +42,13 @@ export type StorageObjectMetadata = {
   updatedAt?: string | null;
 };
 
+export type SignedUploadUrl = {
+  key: string;
+  path: string;
+  signedUrl: string;
+  token: string;
+};
+
 export type StorageDeleteResult = {
   deleted: boolean;
   missing: boolean;
@@ -56,6 +63,7 @@ export interface DocumentStorageAdapter {
   provider: DocumentStorageProvider;
   bucket: string;
   uploadPdf(input: UploadPdfInput): Promise<StorageObjectMetadata>;
+  createSignedUploadUrl?(key: string, options?: { upsert?: boolean }): Promise<SignedUploadUrl>;
   readPdf(key: string): Promise<Buffer>;
   exists(key: string): Promise<boolean>;
   createSignedUrl(key: string, options?: { expiresInSeconds?: number }): Promise<string | null>;
@@ -68,8 +76,11 @@ type SupabaseStorageResponseBody = {
   name?: string;
   public?: boolean;
   statusCode?: string | number;
+  url?: string;
   signedURL?: string;
   signedUrl?: string;
+  token?: string;
+  path?: string;
   message?: string;
   error?: string;
 };
@@ -397,6 +408,40 @@ class SupabaseDocumentStorage implements DocumentStorageAdapter {
     };
   }
 
+  async createSignedUploadUrl(key: string, options: { upsert?: boolean } = {}) {
+    const safeKey = validateStorageObjectKey(key);
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+
+    if (options.upsert) {
+      headers["x-upsert"] = "true";
+    }
+
+    const response = await this.client.fetchStoragePath(`/object/upload/sign/${this.client.encodedBucket}/${encodeObjectKey(safeKey)}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({})
+    });
+
+    await ensureOk(response, `create signed upload URL for ${safeKey}`);
+
+    const body = (await response.json()) as SupabaseStorageResponseBody;
+    const signedUrl = toSupabaseSignedUploadUrl(this.client, body);
+    const token = body.token ?? getTokenFromSignedUrl(signedUrl);
+
+    if (!signedUrl || !token) {
+      throw new Error(`Supabase did not return a signed upload URL for ${safeKey}.`);
+    }
+
+    return {
+      key: safeKey,
+      path: body.path ?? safeKey,
+      signedUrl,
+      token
+    };
+  }
+
   async readPdf(key: string) {
     const safeKey = validateStorageObjectKey(key);
     const response = await this.client.fetchObject(safeKey, {
@@ -654,6 +699,28 @@ function normalizeStorageProvider(provider: string | null | undefined): Document
 
 function normalizeSupabaseUrl(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+function toSupabaseSignedUploadUrl(client: SupabaseStorageClient, body: SupabaseStorageResponseBody) {
+  const signedUrl = body.signedUrl ?? body.signedURL ?? body.url;
+
+  if (!signedUrl) {
+    return null;
+  }
+
+  return client.toAbsoluteStorageUrl(signedUrl);
+}
+
+function getTokenFromSignedUrl(signedUrl: string | null) {
+  if (!signedUrl) {
+    return null;
+  }
+
+  try {
+    return new URL(signedUrl).searchParams.get("token");
+  } catch {
+    return null;
+  }
 }
 
 function requireEnv(env: NodeJS.ProcessEnv, name: string) {

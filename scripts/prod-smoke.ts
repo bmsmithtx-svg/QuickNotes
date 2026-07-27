@@ -1,3 +1,5 @@
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+
 import { loadScriptEnv, requireDatabaseScriptConfig } from "./script-env";
 import { validateProductionEnvironment } from "../src/lib/server/env-validation";
 import { getPrisma, type PrismaClientLike } from "../src/lib/server/db";
@@ -50,7 +52,8 @@ async function main() {
   try {
     await assertDatabaseConnectivity(prisma);
 
-    const uploadRoute = await import("../src/app/api/documents/upload/route");
+    const uploadInitRoute = await import("../src/app/api/documents/upload/init/route");
+    const uploadFinalizeRoute = await import("../src/app/api/documents/upload/finalize/route");
     const sourceRoute = await import("../src/app/api/documents/[id]/source/route");
     const searchRoute = await import("../src/app/api/search/route");
     const answerRoute = await import("../src/app/api/answer/route");
@@ -61,14 +64,7 @@ async function main() {
     const userA = authContext.users[0];
     const userB = authContext.users[1];
     const title = `QuickNotes Production Smoke ${stamp}`;
-    const upload = await jsonResponse(
-      await uploadRoute.POST(
-        authorizedRequest("http://quicknotes.local/api/documents/upload", userA.accessToken, {
-          method: "POST",
-          body: createSmokeFormData(stamp, title)
-        })
-      )
-    );
+    const upload = await uploadSmokePdfDirectly(uploadInitRoute, uploadFinalizeRoute, userA.accessToken, stamp, title);
 
     assertStatus(upload, 201, "upload");
     documentId = getString(upload.body, "documentId");
@@ -476,23 +472,103 @@ async function jsonResponse(response: Response) {
   };
 }
 
-function createSmokeFormData(stamp: string, title: string) {
-  const formData = new FormData();
-
-  formData.set(
-    "file",
-    new File([createSmokePdf()], `quicknotes-production-smoke-${stamp}.pdf`, {
-      type: "application/pdf"
-    })
+async function uploadSmokePdfDirectly(
+  uploadInitRoute: typeof import("../src/app/api/documents/upload/init/route"),
+  uploadFinalizeRoute: typeof import("../src/app/api/documents/upload/finalize/route"),
+  accessToken: string,
+  stamp: string,
+  title: string
+) {
+  const file = createSmokePdfFile(stamp);
+  const init = await jsonResponse(
+    await uploadInitRoute.POST(
+      authorizedRequest("http://quicknotes.local/api/documents/upload/init", accessToken, {
+        method: "POST",
+        body: JSON.stringify({
+          originalFileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type,
+          contentSha256: await sha256File(file),
+          title,
+          className: "Production Smoke",
+          topic: "Persistence",
+          source: "QuickNotes production smoke",
+          documentDate: "2026-07-15",
+          tags: "production-smoke,supabase,vercel"
+        })
+      })
+    )
   );
-  formData.set("title", title);
-  formData.set("className", "Production Smoke");
-  formData.set("topic", "Persistence");
-  formData.set("source", "QuickNotes production smoke");
-  formData.set("documentDate", "2026-07-15");
-  formData.set("tags", "production-smoke,supabase,vercel");
 
-  return formData;
+  assertStatus(init, 201, "direct upload init");
+
+  const bucket = getString(init.body, "bucket");
+  const documentId = getString(init.body, "documentId");
+  const signedUpload = init.body.signedUpload;
+
+  if (!isSignedUploadPayload(signedUpload)) {
+    throw new Error("Direct upload init did not return a signed upload token.");
+  }
+
+  const supabase = createSupabaseClient(requireEnv("NEXT_PUBLIC_SUPABASE_URL"), requireEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"), {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false
+    }
+  });
+  const uploaded = await supabase.storage.from(bucket).uploadToSignedUrl(signedUpload.path, signedUpload.token, file, {
+    cacheControl: "0",
+    contentType: file.type,
+    upsert: false
+  });
+
+  if (uploaded.error) {
+    throw new Error(`Direct Supabase upload failed: ${uploaded.error.message}`);
+  }
+
+  return jsonResponse(
+    await uploadFinalizeRoute.POST(
+      authorizedRequest("http://quicknotes.local/api/documents/upload/finalize", accessToken, {
+        method: "POST",
+        body: JSON.stringify({
+          documentId
+        })
+      })
+    )
+  );
+}
+
+function createSmokePdfFile(stamp: string) {
+  return new File([createSmokePdf()], `quicknotes-production-smoke-${stamp}.pdf`, {
+    type: "application/pdf"
+  });
+}
+
+async function sha256File(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function isSignedUploadPayload(value: unknown): value is { path: string; token: string } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const payload = value as Record<string, unknown>;
+
+  return typeof payload.path === "string" && typeof payload.token === "string";
+}
+
+function requireEnv(name: string) {
+  const value = process.env[name]?.trim();
+
+  if (!value) {
+    throw new Error(`${name} is required for production smoke validation.`);
+  }
+
+  return value;
 }
 
 function createSmokePdf() {

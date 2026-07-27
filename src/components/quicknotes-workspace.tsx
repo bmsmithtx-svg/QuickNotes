@@ -42,6 +42,8 @@ import type {
   AnswerCitation,
   AnswerResponse,
   ChunkSearchResult,
+  DirectDocumentUploadInitResponse,
+  DocumentUploadConfigResponse,
   DocumentUploadResponse,
   DocumentContentResponse,
   MetadataOptionsResponse,
@@ -69,6 +71,10 @@ type AnswerErrorPayload = {
   error?: string;
 };
 
+type ApiErrorPayload = {
+  error?: string;
+};
+
 type FilterState = {
   documentIds: string[];
   classNames: string[];
@@ -90,6 +96,10 @@ type MetadataFormState = {
 
 type MetadataSaveState = "idle" | "saving" | "saved" | "error";
 type WorkspaceTab = "pdfs" | "search" | "metadata";
+type UploadClientConfig = {
+  maxUploadBytes: number | null;
+  uploadMode: DocumentUploadConfigResponse["uploadMode"];
+};
 
 type DocumentDetailResponse = {
   document: StudyDocumentSummary;
@@ -208,6 +218,60 @@ export function getMetadataPanelState(selectedDocument: StudyDocumentSummary | n
   return documents.length > 0 ? "selector" : "pdfs-tab-button";
 }
 
+export async function readApiResponse<T extends object>(response: Response): Promise<T & ApiErrorPayload> {
+  const fallback = response.clone();
+
+  try {
+    return (await response.json()) as T & ApiErrorPayload;
+  } catch {
+    const text = await fallback.text().catch(() => "");
+    const trimmed = text.trim();
+
+    return {
+      error: trimmed || undefined
+    } as T & ApiErrorPayload;
+  }
+}
+
+export function formatUploadLimitError(fileSize: number, maxUploadBytes: number | null) {
+  const fileSizeMessage = formatUploadFileSizeMessage(fileSize);
+
+  if (maxUploadBytes && maxUploadBytes > 0) {
+    return `PDF uploads are limited to ${formatFileSize(maxUploadBytes)} for this deployment.${fileSizeMessage}`;
+  }
+
+  return `PDF upload is too large for this deployment.${fileSizeMessage}`;
+}
+
+export function getUploadFailureMessage(
+  status: number,
+  errorMessage: string | undefined,
+  fileSize: number,
+  maxUploadBytes: number | null
+) {
+  if (status === 413) {
+    const trimmedError = errorMessage?.trim();
+
+    if (trimmedError && !isGenericLargeBodyErrorMessage(trimmedError) && (!maxUploadBytes || maxUploadBytes <= 0)) {
+      return `${trimmedError}${formatUploadFileSizeMessage(fileSize)}`;
+    }
+
+    return formatUploadLimitError(fileSize, maxUploadBytes);
+  }
+
+  return errorMessage?.trim() || "Upload failed.";
+}
+
+function formatUploadFileSizeMessage(fileSize: number) {
+  return fileSize > 0 ? ` This file is ${formatFileSize(fileSize)}.` : "";
+}
+
+function isGenericLargeBodyErrorMessage(message: string) {
+  const normalized = message.toLowerCase();
+
+  return normalized.includes("request entity too large") || normalized.includes("payload too large");
+}
+
 export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null }) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -223,6 +287,8 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
   const [metadataOptionsError, setMetadataOptionsError] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [maxUploadBytes, setMaxUploadBytes] = useState<number | null>(null);
+  const [uploadMode, setUploadMode] = useState<DocumentUploadConfigResponse["uploadMode"]>("route");
   const [isUploading, setIsUploading] = useState(false);
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
   const [searchQuery, setSearchQuery] = useState("");
@@ -283,6 +349,40 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
     },
     [router]
   );
+
+  const loadUploadConfig = useCallback(async () => {
+    try {
+      const response = await fetch("/api/documents/upload", {
+        cache: "no-store"
+      });
+
+      if (handleUnauthorizedResponse(response)) {
+        throw new Error("Session expired.");
+      }
+
+      if (!response.ok) {
+        throw new Error("Could not load upload limits.");
+      }
+
+      const payload = await readApiResponse<Partial<DocumentUploadConfigResponse>>(response);
+      const nextMaxUploadBytes =
+        typeof payload.maxPdfUploadBytes === "number" && payload.maxPdfUploadBytes > 0 ? payload.maxPdfUploadBytes : null;
+      const nextUploadMode = payload.uploadMode === "direct" ? "direct" : "route";
+
+      setMaxUploadBytes(nextMaxUploadBytes);
+      setUploadMode(nextUploadMode);
+
+      return {
+        maxUploadBytes: nextMaxUploadBytes,
+        uploadMode: nextUploadMode
+      };
+    } catch {
+      return {
+        maxUploadBytes: null,
+        uploadMode: "route"
+      } satisfies UploadClientConfig;
+    }
+  }, [handleUnauthorizedResponse]);
 
   const updateWorkspaceUrl = useCallback((updates: { tab?: WorkspaceTab; documentId?: string | null }, mode: "push" | "replace" = "push") => {
     if (typeof window === "undefined") {
@@ -418,7 +518,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
   useEffect(() => {
     let isMounted = true;
 
-    Promise.all([loadDocuments(), loadMetadataOptions()])
+    Promise.all([loadDocuments(), loadMetadataOptions(), loadUploadConfig()])
       .catch((error: unknown) => {
         if (isMounted) {
           setUploadError(error instanceof Error ? error.message : "Could not load documents.");
@@ -429,7 +529,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
     return () => {
       isMounted = false;
     };
-  }, [loadDocuments, loadMetadataOptions]);
+  }, [loadDocuments, loadMetadataOptions, loadUploadConfig]);
 
   useEffect(() => {
     setMetadataSaveState("idle");
@@ -502,25 +602,35 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
       return;
     }
 
-    const formData = new FormData(form);
-    formData.set("file", file);
+    if (!(await fileHasPdfHeader(file))) {
+      setUploadError("The uploaded file is not a valid PDF.");
+      return;
+    }
+
+    const uploadConfig: UploadClientConfig =
+      maxUploadBytes === null
+        ? await loadUploadConfig()
+        : {
+            maxUploadBytes,
+            uploadMode
+          };
+    const uploadLimitBytes = uploadConfig.maxUploadBytes;
+
+    if (uploadLimitBytes && file.size > uploadLimitBytes) {
+      setUploadError(formatUploadLimitError(file.size, uploadLimitBytes));
+      return;
+    }
+
     setIsUploading(true);
-    setUploadMessage("Uploading and processing PDF...");
+    setUploadMessage(uploadConfig.uploadMode === "direct" ? "Preparing PDF upload..." : "Uploading and processing PDF...");
 
     try {
-      const response = await fetch("/api/documents/upload", {
-        method: "POST",
-        body: formData
-      });
-      if (handleUnauthorizedResponse(response)) {
-        throw new Error("Session expired.");
-      }
-
-      const payload = (await response.json()) as Partial<DocumentUploadResponse> & { error?: string };
-
-      if (!response.ok || !payload.documentId) {
-        throw new Error(payload.error ?? "Upload failed.");
-      }
+      const formData = new FormData(form);
+      formData.set("file", file);
+      const payload =
+        uploadConfig.uploadMode === "direct"
+          ? await uploadPdfDirectly(file, formData, uploadLimitBytes)
+          : await uploadPdfThroughRoute(file, formData, uploadLimitBytes);
 
       form.reset();
       setUploadMessage(formatUploadMessage(payload));
@@ -531,6 +641,105 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
       setUploadMessage(null);
     } finally {
       setIsUploading(false);
+    }
+  }
+
+  async function uploadPdfThroughRoute(file: File, formData: FormData, uploadLimitBytes: number | null): Promise<DocumentUploadResponse> {
+    const response = await fetch("/api/documents/upload", {
+      method: "POST",
+      body: formData
+    });
+
+    if (handleUnauthorizedResponse(response)) {
+      throw new Error("Session expired.");
+    }
+
+    const payload = await readApiResponse<Partial<DocumentUploadResponse>>(response);
+
+    if (!response.ok || !payload.documentId) {
+      throw new Error(getUploadFailureMessage(response.status, payload.error, file.size, uploadLimitBytes));
+    }
+
+    return payload as DocumentUploadResponse;
+  }
+
+  async function uploadPdfDirectly(file: File, formData: FormData, uploadLimitBytes: number | null): Promise<DocumentUploadResponse> {
+    const initPayload = {
+      originalFileName: file.name,
+      fileSize: file.size,
+      mimeType: file.type || "application/pdf",
+      contentSha256: await sha256File(file),
+      title: getFormDataTextField(formData, "title"),
+      className: getFormDataTextField(formData, "className"),
+      topic: getFormDataTextField(formData, "topic"),
+      source: getFormDataTextField(formData, "source"),
+      documentDate: getFormDataTextField(formData, "documentDate"),
+      tags: getFormDataTextField(formData, "tags")
+    };
+    const initResponse = await fetch("/api/documents/upload/init", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(initPayload)
+    });
+
+    if (handleUnauthorizedResponse(initResponse)) {
+      throw new Error("Session expired.");
+    }
+
+    const init = await readApiResponse<Partial<DirectDocumentUploadInitResponse>>(initResponse);
+
+    if (!initResponse.ok || !isDirectUploadInitResponse(init)) {
+      throw new Error(getUploadFailureMessage(initResponse.status, init.error, file.size, uploadLimitBytes));
+    }
+
+    let uploadedToStorage = false;
+
+    try {
+      setUploadMessage("Uploading PDF to storage...");
+
+      const supabase = await createClientAsync();
+      const upload = await supabase.storage.from(init.bucket).uploadToSignedUrl(init.signedUpload.path, init.signedUpload.token, file, {
+        cacheControl: "0",
+        contentType: file.type || "application/pdf",
+        upsert: false
+      });
+
+      if (upload.error) {
+        throw new Error(upload.error.message);
+      }
+
+      uploadedToStorage = true;
+      setUploadMessage("Processing PDF...");
+
+      const finalizeResponse = await fetch("/api/documents/upload/finalize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          documentId: init.documentId
+        })
+      });
+
+      if (handleUnauthorizedResponse(finalizeResponse)) {
+        throw new Error("Session expired.");
+      }
+
+      const finalized = await readApiResponse<Partial<DocumentUploadResponse>>(finalizeResponse);
+
+      if (!finalizeResponse.ok || !finalized.documentId) {
+        throw new Error(finalized.error ?? "PDF processing failed.");
+      }
+
+      return finalized as DocumentUploadResponse;
+    } catch (error) {
+      if (!uploadedToStorage) {
+        await cleanupPendingDirectUpload(init.documentId);
+      }
+
+      throw error;
     }
   }
 
@@ -2190,6 +2399,52 @@ function formatDate(value: string) {
     day: "numeric",
     year: "numeric"
   }).format(new Date(value));
+}
+
+function getFormDataTextField(formData: FormData, fieldName: string) {
+  const value = formData.get(fieldName);
+
+  return typeof value === "string" ? value : "";
+}
+
+async function sha256File(file: File) {
+  if (!globalThis.crypto?.subtle) {
+    return null;
+  }
+
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function fileHasPdfHeader(file: File) {
+  const header = await file.slice(0, 5).text();
+
+  return header === "%PDF-";
+}
+
+async function cleanupPendingDirectUpload(documentId: string) {
+  try {
+    await fetch(`/api/documents/${documentId}`, {
+      method: "DELETE"
+    });
+  } catch {
+    // Best-effort cleanup only; finalize/retry can still handle an abandoned upload row.
+  }
+}
+
+function isDirectUploadInitResponse(payload: Partial<DirectDocumentUploadInitResponse>): payload is DirectDocumentUploadInitResponse {
+  const signedUpload = payload.signedUpload;
+
+  return (
+    typeof payload.documentId === "string" &&
+    typeof payload.bucket === "string" &&
+    typeof payload.storageObjectKey === "string" &&
+    signedUpload !== undefined &&
+    typeof signedUpload.path === "string" &&
+    typeof signedUpload.token === "string" &&
+    typeof signedUpload.signedUrl === "string"
+  );
 }
 
 function formatFileSize(bytes: number) {

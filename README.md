@@ -112,7 +112,7 @@ Production requires `DATABASE_URL`, `DIRECT_URL`, `OPENAI_API_KEY`, `OPENAI_EMBE
 
 `QUICKNOTES_LEGACY_OWNER_ID` is only for legacy imports or manual pre-auth backfills. It must be a real Supabase Auth user UUID and should not be used to trust client input.
 
-`QUICKNOTES_MAX_PDF_UPLOAD_BYTES` is optional. The upload route defaults to 25 MB outside Vercel and 4 MB on Vercel to stay below the platform request body limit. Larger production PDFs need a direct-to-storage upload workflow before raising this limit on Vercel.
+`QUICKNOTES_MAX_PDF_UPLOAD_BYTES` is optional. Route uploads default to 25 MB outside Vercel and 4 MB on Vercel to stay below the platform request body limit. Supabase-backed deployments use browser-to-Supabase signed uploads and default to 25 MB because the PDF no longer passes through the Next.js route body.
 
 ## Local PostgreSQL Setup
 
@@ -179,7 +179,7 @@ Set these Vercel environment variables for Production and Preview as appropriate
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `SUPABASE_STORAGE_BUCKET=quicknotes-pdfs`
-- Optional `QUICKNOTES_MAX_PDF_UPLOAD_BYTES`, kept below Vercel's function request body limit
+- Optional `QUICKNOTES_MAX_PDF_UPLOAD_BYTES`, which caps both route uploads and Supabase signed uploads
 
 Do not set `NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY`.
 
@@ -196,9 +196,9 @@ npm run storage:ensure-bucket
 npm run smoke:production
 ```
 
-All API routes that touch Prisma, PDF parsing, storage, embeddings, or OpenAI use the Node.js runtime. Upload, retry, and answer routes set `maxDuration = 300`.
+All API routes that touch Prisma, PDF parsing, storage, embeddings, or OpenAI use the Node.js runtime. Upload finalize, retry, and answer routes set `maxDuration = 300`.
 
-The current direct upload route receives the PDF through the Next.js route handler before storing it in Supabase Storage. On Vercel, this path is limited by the function request body limit, so production uploads default to 4 MB. Larger textbooks require a future direct browser-to-Supabase upload flow followed by server-side processing from the private object.
+For `QUICKNOTES_STORAGE_PROVIDER=supabase`, the browser asks the server for an owner-scoped signed upload URL, uploads the PDF directly to private Supabase Storage, then calls finalize so the server can verify and process the stored object. Local filesystem storage still uses the route upload path.
 
 Keep Vercel Deployment Protection enabled for this milestone. Supabase Auth protects the application workspace and API routes, but deployment protection still shields the production deployment from unsolicited traffic during validation.
 
@@ -340,12 +340,12 @@ Service-role storage operations remain server-only. Before using the service-rol
 
 Upload flow:
 
-1. Validate the uploaded PDF.
+1. Validate the selected PDF and metadata.
 2. Resolve the authenticated Supabase user on the server.
 3. Reserve a `StudyDocument` row in `UPLOADING` with `ownerId = auth.uid()`.
-4. Upload the original PDF through the configured storage adapter to `<ownerId>/<documentId>/source.pdf`.
+4. Store the original PDF at `<ownerId>/<documentId>/source.pdf`: through the route adapter for local storage, or through a signed browser-to-Supabase upload for Supabase storage.
 5. Persist storage provider, bucket, object key, content checksum, MIME type, and size.
-6. Transition to `PROCESSING`.
+6. Finalize the upload and transition to `PROCESSING`.
 7. Read the PDF back through the storage adapter.
 8. Extract pages, create chunks, sync owner-scoped metadata, and generate embeddings through the existing embedding pipeline.
 9. Mark the document `READY`.
@@ -511,8 +511,8 @@ Package scripts use `node --import tsx` instead of the `tsx` CLI so scripts can 
 
 - `DocumentChunkEmbedding.vector` is fixed at `vector(1536)`; changing embedding dimensions requires a schema migration and full embedding rebuild.
 - Only one embedding row is stored per chunk.
-- Local filesystem PDF storage remains available for development through `QUICKNOTES_STORAGE_PROVIDER=local`.
-- Vercel direct route uploads default to 4 MB because the PDF currently passes through a function request body before Supabase Storage. Larger PDFs require a future direct-to-storage upload flow.
+- Local filesystem PDF storage remains available for development through `QUICKNOTES_STORAGE_PROVIDER=local`; that path still uses route uploads.
+- Supabase signed uploads avoid Vercel's function body limit, but very large PDFs can still hit browser memory, Supabase Storage, or processing-duration limits.
 - OCR for scanned PDFs is not implemented.
 - Existing pre-auth production documents require a real Supabase Auth owner assignment before the auth/RLS migration can be applied. The migration fails closed when it cannot determine that owner safely.
 - Live answer/eval verification depends on a working OpenAI key with billing/model access.

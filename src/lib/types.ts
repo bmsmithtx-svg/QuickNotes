@@ -82,6 +82,25 @@ export type DocumentUploadResponse = {
   embeddingError?: string;
 };
 
+export type DocumentUploadConfigResponse = {
+  maxPdfUploadBytes: number;
+  maxPdfUploadMegabytes: number;
+  uploadMode: "route" | "direct";
+  storageProvider: "local" | "supabase";
+};
+
+export type DirectDocumentUploadInitResponse = {
+  documentId: string;
+  originalFileName: string;
+  bucket: string;
+  storageObjectKey: string;
+  signedUpload: {
+    path: string;
+    token: string;
+    signedUrl: string;
+  };
+};
+
 export type SourceCitation = {
   id: string;
   fileName: string;

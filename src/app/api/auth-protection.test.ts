@@ -21,6 +21,8 @@ describe("API authentication boundary", () => {
       const sourceRoute = await import("./documents/[id]/source/route");
       const retryRoute = await import("./documents/[id]/retry/route");
       const uploadRoute = await import("./documents/upload/route");
+      const uploadInitRoute = await import("./documents/upload/init/route");
+      const uploadFinalizeRoute = await import("./documents/upload/finalize/route");
       const searchRoute = await import("./search/route");
       const answerRoute = await import("./answer/route");
       const metadataOptionsRoute = await import("./documents/metadata-options/route");
@@ -34,7 +36,10 @@ describe("API authentication boundary", () => {
         detailRoute.GET(new Request("http://quicknotes.local/api/documents/document-id"), context),
         contentRoute.GET(new Request("http://quicknotes.local/api/documents/document-id/content"), context),
         sourceRoute.GET(new Request("http://quicknotes.local/api/documents/document-id/source"), context),
+        uploadRoute.GET(new Request("http://quicknotes.local/api/documents/upload")),
         uploadRoute.POST(new Request("http://quicknotes.local/api/documents/upload", { method: "POST" })),
+        uploadInitRoute.POST(new Request("http://quicknotes.local/api/documents/upload/init", { method: "POST" })),
+        uploadFinalizeRoute.POST(new Request("http://quicknotes.local/api/documents/upload/finalize", { method: "POST" })),
         searchRoute.GET(new Request("http://quicknotes.local/api/search?q=test")),
         answerRoute.POST(new Request("http://quicknotes.local/api/answer", { method: "POST" })),
         metadataOptionsRoute.GET(new Request("http://quicknotes.local/api/documents/metadata-options")),
