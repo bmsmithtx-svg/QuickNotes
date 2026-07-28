@@ -350,7 +350,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
     [router]
   );
 
-  const loadUploadConfig = useCallback(async () => {
+  const loadUploadConfig = useCallback(async (): Promise<UploadClientConfig> => {
     try {
       const response = await fetch("/api/documents/upload", {
         cache: "no-store"
@@ -367,7 +367,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
       const payload = await readApiResponse<Partial<DocumentUploadConfigResponse>>(response);
       const nextMaxUploadBytes =
         typeof payload.maxPdfUploadBytes === "number" && payload.maxPdfUploadBytes > 0 ? payload.maxPdfUploadBytes : null;
-      const nextUploadMode = payload.uploadMode === "direct" ? "direct" : "route";
+      const nextUploadMode: DocumentUploadConfigResponse["uploadMode"] = payload.uploadMode === "direct" ? "direct" : "route";
 
       setMaxUploadBytes(nextMaxUploadBytes);
       setUploadMode(nextUploadMode);
