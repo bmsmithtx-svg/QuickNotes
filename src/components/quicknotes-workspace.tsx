@@ -10,8 +10,6 @@ import {
   FileText,
   Loader2,
   LogOut,
-  MessageSquareText,
-  Quote,
   RefreshCw,
   RotateCcw,
   Search,
@@ -32,22 +30,18 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type RefObject,
-  type ReactNode,
   type SetStateAction
 } from "react";
 
 import { createClientAsync } from "@/lib/supabase/client";
 import type {
   AppliedRetrievalFilters,
-  AnswerCitation,
-  AnswerResponse,
   ChunkSearchResult,
   DirectDocumentUploadInitResponse,
   DocumentUploadConfigResponse,
   DocumentUploadResponse,
   DocumentContentResponse,
   MetadataOptionsResponse,
-  RetrievalFilters,
   RetrievalMode,
   SearchResponse,
   SearchModeAvailability,
@@ -65,10 +59,6 @@ type SearchErrorPayload = {
   mode?: RetrievalMode;
   actualMode?: RetrievalMode;
   semantic?: SearchModeAvailability;
-};
-
-type AnswerErrorPayload = {
-  error?: string;
 };
 
 type ApiErrorPayload = {
@@ -151,7 +141,6 @@ const searchModeOptions: Array<{ mode: RetrievalMode; label: string }> = [
 ];
 
 const textInputClass = "qn-field h-10 rounded-md px-3 text-sm outline-none";
-const textAreaClass = "qn-field min-h-24 rounded-md px-3 py-2 text-sm leading-6 outline-none";
 const fileInputClass =
   "block w-full text-sm text-[var(--muted)] file:mr-3 file:h-10 file:rounded-md file:border-0 file:bg-[var(--accent)] file:px-3 file:text-sm file:font-semibold file:text-[var(--accent-contrast)] hover:file:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -216,6 +205,14 @@ export function getMetadataPanelState(selectedDocument: StudyDocumentSummary | n
   }
 
   return documents.length > 0 ? "selector" : "pdfs-tab-button";
+}
+
+export function getSearchResultSourceDisplay(result: ChunkSearchResult) {
+  return {
+    quote: result.citation.sourceChunk,
+    pageNumber: result.pageNumber,
+    pdfName: result.originalFileName.trim() || result.documentTitle
+  };
 }
 
 export async function readApiResponse<T extends object>(response: Response): Promise<T & ApiErrorPayload> {
@@ -302,12 +299,6 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
   > | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [answerQuestion, setAnswerQuestion] = useState("");
-  const [answerMode, setAnswerMode] = useState<RetrievalMode>("hybrid");
-  const [answerResponse, setAnswerResponse] = useState<AnswerResponse | null>(null);
-  const [selectedCitationId, setSelectedCitationId] = useState<number | null>(null);
-  const [isAnswering, setIsAnswering] = useState(false);
-  const [answerError, setAnswerError] = useState<string | null>(null);
   const [metadataForm, setMetadataForm] = useState<MetadataFormState>({
     title: "",
     className: "",
@@ -323,10 +314,6 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
   const selectedDocument = useMemo(
     () => documents.find((document) => document.id === selectedDocumentId) ?? null,
     [documents, selectedDocumentId]
-  );
-  const selectedCitation = useMemo(
-    () => answerResponse?.citations.find((citation) => citation.id === selectedCitationId) ?? null,
-    [answerResponse, selectedCitationId]
   );
   const hasActiveFilters = useMemo(() => isFilterStateActive(filters), [filters]);
 
@@ -815,58 +802,6 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
     }
   }
 
-  async function handleAnswer(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const question = answerQuestion.trim();
-
-    setAnswerError(null);
-
-    if (!question) {
-      setAnswerResponse(null);
-      setSelectedCitationId(null);
-      return;
-    }
-
-    setIsAnswering(true);
-
-    try {
-      const response = await fetch("/api/answer", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          question,
-          mode: answerMode,
-          topK: 8,
-          filters: filtersToPayload(filters)
-        })
-      });
-      if (handleUnauthorizedResponse(response)) {
-        throw new Error("Session expired.");
-      }
-
-      const payload = (await response.json()) as AnswerResponse | AnswerErrorPayload;
-
-      if (!response.ok || !("status" in payload)) {
-        throw new Error("error" in payload ? payload.error ?? "Answer generation failed." : "Answer generation failed.");
-      }
-
-      setAnswerResponse(payload);
-      setSelectedCitationId(payload.citations[0]?.id ?? null);
-
-      if (payload.retrievedChunks[0]) {
-        selectDocument(payload.retrievedChunks[0].documentId, "replace");
-      }
-    } catch (error) {
-      setAnswerError(error instanceof Error ? error.message : "Answer generation failed.");
-      setAnswerResponse(null);
-      setSelectedCitationId(null);
-    } finally {
-      setIsAnswering(false);
-    }
-  }
-
   function selectSearchResult(result: ChunkSearchResult) {
     setSelectedSearchResult(result);
     selectDocument(result.documentId);
@@ -1076,8 +1011,8 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
           className="outline-none"
         >
           {activeTab === "pdfs" ? (
-            <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-              <aside className="flex flex-col gap-4">
+            <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
+              <aside className="min-w-0">
                 <UploadPanel
                   fileInputRef={fileInputRef}
                   isUploading={isUploading}
@@ -1085,6 +1020,8 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                   uploadError={uploadError}
                   onUpload={handleUpload}
                 />
+              </aside>
+              <div className="flex min-w-0 flex-col gap-4">
                 <DocumentsPanel
                   documents={documents}
                   selectedDocumentId={selectedDocumentId}
@@ -1094,8 +1031,6 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                     setSelectedSearchResult(null);
                   }}
                 />
-              </aside>
-              <div className="flex min-w-0 flex-col gap-4">
                 <DocumentPreviewPanel
                   selectedDocument={selectedDocument}
                   selectedDocumentId={selectedDocumentId}
@@ -1124,39 +1059,21 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                 searchAppliedFilters={searchAppliedFilters}
                 searchError={searchError}
                 isSearching={isSearching}
-                isAnswering={isAnswering}
                 onSearch={handleSearch}
                 onSearchModeChange={setSearchMode}
                 onSearchQueryChange={setSearchQuery}
                 onFiltersChange={setFilters}
                 onClearFilters={() => setFilters(emptyFilters)}
               />
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                <SearchResultsPanel
-                  searchQuery={searchQuery}
-                  results={searchResults}
-                  selectedSearchResult={selectedSearchResult}
-                  isSearching={isSearching}
-                  searchError={searchError}
-                  hasActiveFilters={hasActiveFilters}
-                  onSelect={selectSearchResult}
-                />
-                <AnswerPanel
-                  filters={filters}
-                  documents={documents}
-                  answerMode={answerMode}
-                  answerQuestion={answerQuestion}
-                  answerResponse={answerResponse}
-                  selectedCitation={selectedCitation}
-                  selectedCitationId={selectedCitationId}
-                  answerError={answerError}
-                  isAnswering={isAnswering}
-                  onAnswer={handleAnswer}
-                  onAnswerModeChange={setAnswerMode}
-                  onAnswerQuestionChange={setAnswerQuestion}
-                  onCitationSelect={setSelectedCitationId}
-                />
-              </div>
+              <SearchResultsPanel
+                searchQuery={searchQuery}
+                results={searchResults}
+                selectedSearchResult={selectedSearchResult}
+                isSearching={isSearching}
+                searchError={searchError}
+                hasActiveFilters={hasActiveFilters}
+                onSelect={selectSearchResult}
+              />
               <DocumentPreviewPanel
                 selectedDocument={selectedDocument}
                 selectedDocumentId={selectedDocumentId}
@@ -1354,7 +1271,6 @@ function SearchControlsPanel({
   searchAppliedFilters,
   searchError,
   isSearching,
-  isAnswering,
   onSearch,
   onSearchModeChange,
   onSearchQueryChange,
@@ -1371,7 +1287,6 @@ function SearchControlsPanel({
   searchAppliedFilters: AppliedRetrievalFilters | null;
   searchError: string | null;
   isSearching: boolean;
-  isAnswering: boolean;
   onSearch: (event: FormEvent<HTMLFormElement>) => void;
   onSearchModeChange: (mode: RetrievalMode) => void;
   onSearchQueryChange: (query: string) => void;
@@ -1439,7 +1354,7 @@ function SearchControlsPanel({
             filters={filters}
             documents={documents}
             options={metadataOptions}
-            disabled={isSearching || isAnswering}
+            disabled={isSearching}
             layout="compact"
             onChange={onFiltersChange}
             onClear={onClearFilters}
@@ -1491,152 +1406,24 @@ function SearchResultsPanel({
         {!isSearching && !searchQuery.trim() && results.length === 0 ? (
           <p className="p-4 text-sm text-[var(--muted)]">Search your PDFs by keyword, semantic meaning, or hybrid ranking.</p>
         ) : null}
-        {results.map((result) => (
-          <button
-            key={result.chunkId}
-            type="button"
-            onClick={() => onSelect(result)}
-            className={`qn-row block w-full px-4 py-3 text-left ${result.chunkId === selectedSearchResult?.chunkId ? "qn-row-selected" : ""}`}
-          >
-            <div className="flex items-center justify-between gap-3 text-xs font-semibold text-[var(--muted)]">
-              <span>{formatPrimaryRanking(result)}</span>
-              <span>Page {result.pageNumber} / Chunk {result.chunkIndex}</span>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold text-[var(--muted)]">
-              {formatRankingBadges(result).map((badge) => (
-                <span key={badge} className="qn-chip rounded-sm px-2 py-1">
-                  {badge}
-                </span>
-              ))}
-            </div>
-            <h3 className="mt-2 truncate text-sm font-semibold">{result.documentTitle}</h3>
-            <p className="mt-1 truncate text-xs text-[var(--muted)]">{result.originalFileName}</p>
-            <p className="mt-2 line-clamp-3 text-sm leading-6">{result.textPreview}</p>
-          </button>
-        ))}
-      </div>
-    </section>
-  );
-}
+        {results.map((result) => {
+          const display = getSearchResultSourceDisplay(result);
 
-function AnswerPanel({
-  filters,
-  documents,
-  answerMode,
-  answerQuestion,
-  answerResponse,
-  selectedCitation,
-  selectedCitationId,
-  answerError,
-  isAnswering,
-  onAnswer,
-  onAnswerModeChange,
-  onAnswerQuestionChange,
-  onCitationSelect
-}: {
-  filters: FilterState;
-  documents: StudyDocumentSummary[];
-  answerMode: RetrievalMode;
-  answerQuestion: string;
-  answerResponse: AnswerResponse | null;
-  selectedCitation: AnswerCitation | null;
-  selectedCitationId: number | null;
-  answerError: string | null;
-  isAnswering: boolean;
-  onAnswer: (event: FormEvent<HTMLFormElement>) => void;
-  onAnswerModeChange: (mode: RetrievalMode) => void;
-  onAnswerQuestionChange: (question: string) => void;
-  onCitationSelect: (citationId: number) => void;
-}) {
-  return (
-    <section className="qn-panel rounded-md">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Ask QuickNotes</h2>
-        <MessageSquareText aria-hidden="true" size={18} className="text-[var(--accent)]" />
+          return (
+            <button
+              key={result.chunkId}
+              type="button"
+              onClick={() => onSelect(result)}
+              className={`qn-row block w-full min-w-0 px-4 py-3 text-left ${result.chunkId === selectedSearchResult?.chunkId ? "qn-row-selected" : ""}`}
+            >
+              <blockquote className="whitespace-pre-wrap break-words text-sm leading-6">{display.quote}</blockquote>
+              <p className="mt-3 break-words text-xs font-semibold text-[var(--muted)]">
+                Page {display.pageNumber} — {display.pdfName}
+              </p>
+            </button>
+          );
+        })}
       </div>
-      <form onSubmit={onAnswer} className="flex flex-col gap-3 p-4">
-        <div className="grid gap-3 md:grid-cols-[280px_minmax(0,1fr)] md:items-center">
-          <div className="qn-segmented grid grid-cols-3 rounded-md p-1" role="radiogroup" aria-label="Answer retrieval mode">
-            {searchModeOptions.map((option) => (
-              <button
-                key={option.mode}
-                type="button"
-                onClick={() => onAnswerModeChange(option.mode)}
-                className={`qn-segment h-9 rounded-sm text-xs font-semibold ${answerMode === option.mode ? "qn-segment-active" : ""}`}
-                aria-pressed={answerMode === option.mode}
-                disabled={isAnswering}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <ActiveScope filters={filters} documents={documents} emptyLabel="All documents" />
-        </div>
-        <div className="flex flex-col gap-2 md:flex-row">
-          <textarea
-            value={answerQuestion}
-            onChange={(event) => onAnswerQuestionChange(event.target.value)}
-            placeholder="Ask a question about your documents"
-            className={`${textAreaClass} min-w-0 flex-1`}
-            disabled={isAnswering}
-          />
-          <button
-            type="submit"
-            className="qn-primary-button inline-flex h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60 md:self-start"
-            disabled={isAnswering}
-            title="Ask QuickNotes"
-          >
-            {isAnswering ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : <MessageSquareText aria-hidden="true" size={16} />}
-            Ask
-          </button>
-        </div>
-      </form>
-      {answerError ? <p className="qn-state-error m-4 rounded-md px-3 py-2 text-sm">{answerError}</p> : null}
-      {isAnswering ? (
-        <div className="flex items-center gap-2 border-t border-[var(--border)] p-4 text-sm text-[var(--muted)]">
-          <Loader2 aria-hidden="true" size={16} className="animate-spin" />
-          Answering
-        </div>
-      ) : null}
-      {answerResponse && !isAnswering ? (
-        <div className="border-t border-[var(--border)] p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
-            <span className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">{answerResponse.retrievalMode}</span>
-            <span className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">{answerResponse.model}</span>
-            <span>{answerResponse.retrievedChunks.length} chunks retrieved</span>
-          </div>
-          <ActiveScope filters={answerResponse.filters} documents={documents} />
-          {answerResponse.status === "insufficient_evidence" ? (
-            <p className="qn-state-warning rounded-md p-3 text-sm leading-6">
-              {hasAppliedFilters(answerResponse.filters)
-                ? `${answerResponse.answer} The selected filters may be too restrictive.`
-                : answerResponse.answer}
-            </p>
-          ) : (
-            <AnswerText answer={answerResponse.answer} citations={answerResponse.citations} onCitationClick={onCitationSelect} />
-          )}
-          {answerResponse.citations.length > 0 ? (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {answerResponse.citations.map((citation) => (
-                <button
-                  key={citation.id}
-                  type="button"
-                  onClick={() => onCitationSelect(citation.id)}
-                  className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs font-semibold ${
-                    selectedCitationId === citation.id
-                      ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-contrast)]"
-                      : "qn-secondary-button"
-                  }`}
-                >
-                  <Quote aria-hidden="true" size={14} />
-                  {citation.marker} Page {citation.pageNumber}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {selectedCitation ? <CitationReveal citation={selectedCitation} /> : null}
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -1662,6 +1449,11 @@ function DocumentPreviewPanel({
   onRetry: (document: StudyDocumentSummary) => void;
   onDelete: (document: StudyDocumentSummary) => void;
 }) {
+  const selectedSearchResultDisplay =
+    previewMode === "chunks" && selectedSearchResult && selectedSearchResult.documentId === selectedDocumentId
+      ? getSearchResultSourceDisplay(selectedSearchResult)
+      : null;
+
   return (
     <section className="qn-panel rounded-md">
       <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 md:flex-row md:items-center md:justify-between">
@@ -1716,22 +1508,12 @@ function DocumentPreviewPanel({
         ) : null}
       </div>
 
-      {previewMode === "chunks" && selectedSearchResult && selectedSearchResult.documentId === selectedDocumentId ? (
+      {selectedSearchResultDisplay ? (
         <article className="border-b border-[var(--border)] bg-[var(--panel-strong)] p-4">
-          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
-            <span>Selected search result</span>
-            <span className="qn-chip-strong rounded-sm px-2 py-1">Page {selectedSearchResult.pageNumber}</span>
-            <span className="qn-chip-strong rounded-sm px-2 py-1">Chunk {selectedSearchResult.chunkIndex}</span>
-            <span>{formatPrimaryRanking(selectedSearchResult)}</span>
-          </div>
-          <div className="mb-3 flex flex-wrap gap-2 text-[11px] font-semibold text-[var(--muted)]">
-            {formatRankingBadges(selectedSearchResult).map((badge) => (
-              <span key={badge} className="qn-chip-strong rounded-sm px-2 py-1">
-                {badge}
-              </span>
-            ))}
-          </div>
-          <p className="text-sm leading-6">{selectedSearchResult.textPreview}</p>
+          <blockquote className="whitespace-pre-wrap break-words text-sm leading-6">{selectedSearchResultDisplay.quote}</blockquote>
+          <p className="mt-3 break-words text-xs font-semibold text-[var(--muted)]">
+            Page {selectedSearchResultDisplay.pageNumber} — {selectedSearchResultDisplay.pdfName}
+          </p>
         </article>
       ) : null}
 
@@ -2184,72 +1966,6 @@ function SearchModeNotice({
   return <p className="border-t border-[var(--border)] px-4 py-3 text-xs text-[var(--muted)]">{message}</p>;
 }
 
-function AnswerText({
-  answer,
-  citations,
-  onCitationClick
-}: {
-  answer: string;
-  citations: AnswerCitation[];
-  onCitationClick: (citationId: number) => void;
-}) {
-  const citationIds = new Set(citations.map((citation) => citation.id));
-  const parts: ReactNode[] = [];
-  const markerPattern = /\[(\d+)]/g;
-  let cursor = 0;
-  let match = markerPattern.exec(answer);
-
-  while (match) {
-    const markerStart = match.index;
-    const markerEnd = markerStart + match[0].length;
-    const citationId = Number.parseInt(match[1], 10);
-
-    if (markerStart > cursor) {
-      parts.push(answer.slice(cursor, markerStart));
-    }
-
-    if (citationIds.has(citationId)) {
-      parts.push(
-        <button
-          key={`${citationId}-${markerStart}`}
-          type="button"
-          onClick={() => onCitationClick(citationId)}
-          className="mx-0.5 rounded-sm bg-[var(--panel-selected)] px-1.5 py-0.5 text-xs font-semibold text-[var(--accent-strong)] hover:bg-[var(--panel-hover)]"
-        >
-          {match[0]}
-        </button>
-      );
-    } else {
-      parts.push(match[0]);
-    }
-
-    cursor = markerEnd;
-    match = markerPattern.exec(answer);
-  }
-
-  if (cursor < answer.length) {
-    parts.push(answer.slice(cursor));
-  }
-
-  return <p className="whitespace-pre-wrap rounded-md border border-[var(--border)] bg-[var(--control)] p-3 text-sm leading-6">{parts}</p>;
-}
-
-function CitationReveal({ citation }: { citation: AnswerCitation }) {
-  return (
-    <article className="mt-4 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-4">
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
-        <span>{citation.marker}</span>
-        <span className="qn-chip-strong rounded-sm px-2 py-1">{citation.documentTitle}</span>
-        <span className="qn-chip-strong rounded-sm px-2 py-1">Page {citation.pageNumber}</span>
-        <span className="qn-chip-strong rounded-sm px-2 py-1">Rank {citation.retrievalRank}</span>
-        <span>Score {formatScore(citation.retrievalScore)}</span>
-      </div>
-      <p className="mb-2 truncate text-xs text-[var(--muted)]">{citation.documentFileName}</p>
-      <p className="whitespace-pre-wrap text-sm leading-6">{citation.sourceText}</p>
-    </article>
-  );
-}
-
 function appendFiltersToSearchParams(parameters: URLSearchParams, filters: FilterState) {
   appendArrayParameters(parameters, "documentId", filters.documentIds);
   appendArrayParameters(parameters, "className", filters.classNames);
@@ -2264,18 +1980,6 @@ function appendFiltersToSearchParams(parameters: URLSearchParams, filters: Filte
   if (filters.documentDateTo) {
     parameters.set("documentDateTo", filters.documentDateTo);
   }
-}
-
-function filtersToPayload(filters: FilterState): RetrievalFilters {
-  return {
-    documentIds: filters.documentIds.length > 0 ? filters.documentIds : undefined,
-    classNames: filters.classNames.length > 0 ? filters.classNames : undefined,
-    topics: filters.topics.length > 0 ? filters.topics : undefined,
-    sources: filters.sources.length > 0 ? filters.sources : undefined,
-    tags: filters.tags.length > 0 ? filters.tags : undefined,
-    documentDateFrom: filters.documentDateFrom || undefined,
-    documentDateTo: filters.documentDateTo || undefined
-  };
 }
 
 function appendArrayParameters(parameters: URLSearchParams, name: string, values: string[]) {
@@ -2300,18 +2004,6 @@ function splitTags(value: string) {
 }
 
 function isFilterStateActive(filters: FilterState) {
-  return (
-    filters.documentIds.length > 0 ||
-    filters.classNames.length > 0 ||
-    filters.topics.length > 0 ||
-    filters.sources.length > 0 ||
-    filters.tags.length > 0 ||
-    Boolean(filters.documentDateFrom) ||
-    Boolean(filters.documentDateTo)
-  );
-}
-
-function hasAppliedFilters(filters: AppliedRetrievalFilters) {
   return (
     filters.documentIds.length > 0 ||
     filters.classNames.length > 0 ||
@@ -2360,34 +2052,6 @@ function formatUploadMessage(payload: Partial<DocumentUploadResponse>) {
   }
 
   return base;
-}
-
-function formatPrimaryRanking(result: ChunkSearchResult) {
-  const label = result.ranking.mode === "hybrid" ? "Final" : result.ranking.mode === "semantic" ? "Semantic" : "Keyword";
-
-  return `${label} rank ${result.rank} / ${formatScore(result.score)}`;
-}
-
-function formatRankingBadges(result: ChunkSearchResult) {
-  const badges: string[] = [];
-
-  if (result.ranking.keywordRank) {
-    badges.push(`Keyword #${result.ranking.keywordRank}`);
-  }
-
-  if (typeof result.ranking.semanticSimilarity === "number") {
-    badges.push(`Similarity ${formatScore(result.ranking.semanticSimilarity)}`);
-  }
-
-  if (result.ranking.semanticRank) {
-    badges.push(`Semantic #${result.ranking.semanticRank}`);
-  }
-
-  if (result.ranking.mode === "hybrid") {
-    badges.unshift(`RRF ${formatScore(result.ranking.finalScore)}`);
-  }
-
-  return badges;
 }
 
 function StatusBadge({ status }: { status: StudyDocumentUploadStatus }) {
@@ -2467,12 +2131,4 @@ function formatFileSize(bytes: number) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatScore(score: number) {
-  if (!Number.isFinite(score)) {
-    return "0";
-  }
-
-  return score.toFixed(4);
 }

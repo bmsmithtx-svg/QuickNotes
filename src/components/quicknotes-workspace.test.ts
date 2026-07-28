@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { DocumentContentResponse, StudyDocumentSummary } from "../lib/types";
+import type { ChunkSearchResult, DocumentContentResponse, StudyDocumentSummary } from "../lib/types";
 import {
   applySavedDocumentToWorkspaceState,
   formatUploadLimitError,
   getUploadFailureMessage,
   getMetadataPanelState,
+  getSearchResultSourceDisplay,
   getWorkspaceTabHref,
   normalizeWorkspaceTab,
   readApiResponse,
@@ -64,6 +65,32 @@ describe("workspace metadata state", () => {
     assert.equal(nextState.documents[1], otherDocument);
     assert.equal(nextState.content?.document.title, "Updated");
     assert.equal(nextState.content?.document.source, "Textbook");
+  });
+});
+
+describe("workspace search result display", () => {
+  it("uses the exact retrieved source text, page number, and PDF filename", () => {
+    const result = makeSearchResult({
+      originalFileName: "CellEnergy.pdf",
+      pageNumber: 4,
+      textPreview: "Preview text should not be displayed.",
+      citation: {
+        id: "chunk_1",
+        fileName: "CellEnergy.pdf",
+        pageNumber: 4,
+        chunkIndex: 2,
+        sourceChunk: "The mitochondria convert stored energy into ATP for the cell.\nThis line is exact source text."
+      }
+    });
+
+    const display = getSearchResultSourceDisplay(result);
+
+    assert.deepEqual(Object.keys(display).sort(), ["pageNumber", "pdfName", "quote"]);
+    assert.deepEqual(display, {
+      quote: "The mitochondria convert stored energy into ATP for the cell.\nThis line is exact source text.",
+      pageNumber: 4,
+      pdfName: "CellEnergy.pdf"
+    });
   });
 });
 
@@ -136,5 +163,39 @@ function makeContent(document: StudyDocumentSummary): DocumentContentResponse {
     chunks: [],
     pageTotal: 0,
     chunkTotal: 0
+  };
+}
+
+function makeSearchResult(overrides: Partial<ChunkSearchResult> = {}): ChunkSearchResult {
+  return {
+    chunkId: "chunk_1",
+    documentId: "doc_a",
+    documentTitle: "Cell Energy Notes",
+    originalFileName: "cell-energy.pdf",
+    className: "Biology",
+    topic: "cells",
+    source: "Course notes",
+    documentDate: "2026-07-12",
+    tags: ["exam"],
+    pageNumber: 1,
+    chunkIndex: 1,
+    textPreview: "Preview text.",
+    score: 0.75,
+    rank: 1,
+    ranking: {
+      mode: "keyword",
+      finalRank: 1,
+      finalScore: 0.75,
+      keywordRank: 1,
+      keywordScore: 0.75
+    },
+    citation: {
+      id: "chunk_1",
+      fileName: "cell-energy.pdf",
+      pageNumber: 1,
+      chunkIndex: 1,
+      sourceChunk: "Exact source chunk text."
+    },
+    ...overrides
   };
 }
