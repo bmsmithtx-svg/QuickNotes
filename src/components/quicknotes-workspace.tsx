@@ -1102,11 +1102,11 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
                   selectedSearchResult={selectedSearchResult}
                   content={content}
                   isLoadingContent={isLoadingContent}
+                  previewMode="title"
                   documentActionId={documentActionId}
                   onRetry={handleRetryDocument}
                   onDelete={handleDeleteDocument}
                 />
-                <PageTextPanel content={content} />
               </div>
             </div>
           ) : null}
@@ -1647,6 +1647,7 @@ function DocumentPreviewPanel({
   selectedSearchResult,
   content,
   isLoadingContent,
+  previewMode = "chunks",
   documentActionId,
   onRetry,
   onDelete
@@ -1656,6 +1657,7 @@ function DocumentPreviewPanel({
   selectedSearchResult: ChunkSearchResult | null;
   content: DocumentContentResponse | null;
   isLoadingContent: boolean;
+  previewMode?: "chunks" | "title";
   documentActionId: string | null;
   onRetry: (document: StudyDocumentSummary) => void;
   onDelete: (document: StudyDocumentSummary) => void;
@@ -1714,7 +1716,7 @@ function DocumentPreviewPanel({
         ) : null}
       </div>
 
-      {selectedSearchResult && selectedSearchResult.documentId === selectedDocumentId ? (
+      {previewMode === "chunks" && selectedSearchResult && selectedSearchResult.documentId === selectedDocumentId ? (
         <article className="border-b border-[var(--border)] bg-[var(--panel-strong)] p-4">
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
             <span>Selected search result</span>
@@ -1733,18 +1735,26 @@ function DocumentPreviewPanel({
         </article>
       ) : null}
 
-      <div className="divide-y divide-[var(--border)]">
-        {isLoadingContent ? (
+      <div className={previewMode === "chunks" ? "divide-y divide-[var(--border)]" : ""}>
+        {previewMode === "title" && selectedDocument ? (
+          <div className="p-5">
+            <p className="text-base font-semibold">{selectedDocument.title}</p>
+          </div>
+        ) : null}
+        {previewMode === "title" && !selectedDocument ? <p className="p-5 text-sm text-[var(--muted)]">No document selected.</p> : null}
+        {previewMode === "chunks" && isLoadingContent ? (
           <div className="flex items-center gap-2 p-5 text-sm text-[var(--muted)]">
             <Loader2 aria-hidden="true" size={16} className="animate-spin" />
             Loading preview
           </div>
         ) : null}
-        {!isLoadingContent && !selectedDocument ? <p className="p-5 text-sm text-[var(--muted)]">No document selected.</p> : null}
-        {!isLoadingContent && selectedDocument && content?.chunks.length === 0 ? (
+        {previewMode === "chunks" && !isLoadingContent && !selectedDocument ? (
+          <p className="p-5 text-sm text-[var(--muted)]">No document selected.</p>
+        ) : null}
+        {previewMode === "chunks" && !isLoadingContent && selectedDocument && content?.chunks.length === 0 ? (
           <p className="p-5 text-sm text-[var(--muted)]">No extracted chunks available.</p>
         ) : null}
-        {!isLoadingContent
+        {previewMode === "chunks" && !isLoadingContent
           ? content?.chunks.map((chunk) => (
               <article key={chunk.id} className="p-5">
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
