@@ -50,10 +50,10 @@ export function AuthForm({ reason }: { reason?: string | null }) {
   return (
     <main className="min-h-screen bg-[var(--background)] px-4 py-8 text-[var(--foreground)]">
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-md items-center">
-        <section className="qn-panel w-full rounded-md">
-          <div className="border-b border-[var(--border)] p-5">
+        <section className="qn-panel w-full rounded-lg">
+          <div className="qn-panel-header p-5">
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-              <h1 className="shrink-0 text-xl font-semibold tracking-normal sm:text-2xl">QuickNotes</h1>
+              <h1 className="qn-page-title shrink-0 text-2xl font-semibold tracking-normal">QuickNotes</h1>
               <span aria-hidden="true" className="h-5 w-px shrink-0 bg-[var(--border-strong)]" />
               <p className="shrink-0 text-[0.6rem] font-semibold uppercase tracking-normal text-[var(--muted)] sm:text-xs">
                 Powered by
@@ -70,7 +70,7 @@ export function AuthForm({ reason }: { reason?: string | null }) {
             <p className="mt-1 text-sm text-[var(--muted)]">{mode === "sign-in" ? "Sign in to continue." : "Create an account."}</p>
           </div>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5">
-            <div className="qn-segmented grid grid-cols-2 rounded-md p-1" role="radiogroup" aria-label="Authentication mode">
+            <div className="qn-segmented grid grid-cols-2 rounded-lg p-1" role="radiogroup" aria-label="Authentication mode">
               <button
                 type="button"
                 disabled={isSubmitting}
@@ -79,7 +79,7 @@ export function AuthForm({ reason }: { reason?: string | null }) {
                   setError(null);
                   setMessage(null);
                 }}
-                className={`qn-segment inline-flex h-9 items-center justify-center gap-2 rounded-sm text-sm font-semibold ${
+                className={`qn-segment inline-flex h-9 items-center justify-center gap-2 rounded-md text-sm font-semibold ${
                   mode === "sign-in" ? "qn-segment-active" : ""
                 }`}
                 aria-pressed={mode === "sign-in"}
@@ -95,7 +95,7 @@ export function AuthForm({ reason }: { reason?: string | null }) {
                   setError(null);
                   setMessage(null);
                 }}
-                className={`qn-segment inline-flex h-9 items-center justify-center gap-2 rounded-sm text-sm font-semibold ${
+                className={`qn-segment inline-flex h-9 items-center justify-center gap-2 rounded-md text-sm font-semibold ${
                   mode === "sign-up" ? "qn-segment-active" : ""
                 }`}
                 aria-pressed={mode === "sign-up"}
@@ -106,7 +106,7 @@ export function AuthForm({ reason }: { reason?: string | null }) {
             </div>
             <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-normal text-[var(--muted)]">
               Email
-              <span className="qn-field flex h-11 items-center gap-2 rounded-md px-3">
+              <span className="qn-field flex h-11 items-center gap-2 rounded-lg px-3">
                 <Mail aria-hidden="true" size={16} className="text-[var(--muted)]" />
                 <input
                   value={email}
@@ -121,7 +121,7 @@ export function AuthForm({ reason }: { reason?: string | null }) {
             </label>
             <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-normal text-[var(--muted)]">
               Password
-              <span className="qn-field flex h-11 items-center gap-2 rounded-md px-3">
+              <span className="qn-field flex h-11 items-center gap-2 rounded-lg px-3">
                 <Lock aria-hidden="true" size={16} className="text-[var(--muted)]" />
                 <input
                   value={password}
@@ -137,7 +137,7 @@ export function AuthForm({ reason }: { reason?: string | null }) {
             </label>
             <button
               type="submit"
-              className="qn-primary-button inline-flex h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+              className="qn-primary-button inline-flex h-11 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isSubmitting}
             >
               {mode === "sign-in" ? <LogIn aria-hidden="true" size={16} /> : <UserPlus aria-hidden="true" size={16} />}
@@ -149,7 +149,7 @@ export function AuthForm({ reason }: { reason?: string | null }) {
               </p>
             ) : null}
             {error ? (
-              <p role="alert" className="qn-state-error rounded-md px-3 py-2 text-sm">
+              <p role="alert" className="qn-state-error rounded-lg px-3 py-2 text-sm">
                 {error}
               </p>
             ) : null}

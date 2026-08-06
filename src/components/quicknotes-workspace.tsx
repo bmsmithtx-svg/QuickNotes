@@ -140,9 +140,9 @@ const searchModeOptions: Array<{ mode: RetrievalMode; label: string }> = [
   { mode: "keyword", label: "Keyword" }
 ];
 
-const textInputClass = "qn-field h-10 rounded-md px-3 text-sm outline-none";
+const textInputClass = "qn-field h-11 rounded-lg px-3 text-sm outline-none";
 const fileInputClass =
-  "block w-full text-sm text-[var(--muted)] file:mr-3 file:h-10 file:rounded-md file:border-0 file:bg-[var(--accent)] file:px-3 file:text-sm file:font-semibold file:text-[var(--accent-contrast)] hover:file:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60";
+  "block w-full text-sm text-[var(--muted)] file:mr-3 file:h-11 file:rounded-lg file:border-0 file:bg-[var(--accent)] file:px-3 file:text-sm file:font-semibold file:text-[var(--accent-contrast)] hover:file:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60";
 
 export function normalizeWorkspaceTab(value: string | null | undefined): WorkspaceTab {
   return value === "search" || value === "metadata" || value === "pdfs" ? value : "pdfs";
@@ -950,17 +950,17 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
   }
 
   return (
-    <main className="min-h-screen bg-[var(--background)] px-4 py-5 text-[var(--foreground)] sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-[var(--background)] px-3 py-4 text-[var(--foreground)] sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-5">
-        <header className="flex flex-col gap-4 border-b border-[var(--border)] pb-5 md:flex-row md:items-center md:justify-between">
+        <header className="qn-app-header flex flex-col gap-4 rounded-lg p-4 md:flex-row md:items-center md:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-contrast)]">
+            <div className="qn-brand-mark flex size-12 items-center justify-center rounded-lg">
               <BookOpen aria-hidden="true" size={22} />
             </div>
             <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-1">
               <div className="min-w-0">
-                <h1 className="text-2xl font-semibold tracking-normal">QuickNotes</h1>
-                <p className="text-sm text-[var(--muted)]">Document library</p>
+                <h1 className="qn-page-title text-3xl font-semibold tracking-normal">QuickNotes</h1>
+                <p className="text-sm font-medium text-[var(--muted)]">Focused study workspace</p>
               </div>
               <div className="mt-1 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap leading-none">
                 <span aria-hidden="true" className="qn-smitty-mark size-5 shrink-0 rounded-sm opacity-80" />
@@ -970,11 +970,11 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {userEmail ? <span className="text-sm text-[var(--muted)]">{userEmail}</span> : null}
+            {userEmail ? <span className="qn-chip-strong max-w-full truncate rounded-full px-3 py-1.5 text-sm">{userEmail}</span> : null}
             <button
               type="button"
               onClick={() => loadDocuments().catch(() => setUploadError("Could not refresh documents."))}
-              className="qn-secondary-button inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium"
+              className="qn-secondary-button inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium"
               title="Refresh documents"
             >
               <RefreshCw aria-hidden="true" size={16} />
@@ -982,7 +982,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
             </button>
             <a
               href="/api/health"
-              className="qn-secondary-button inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium"
+              className="qn-secondary-button inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium"
             >
               <Database aria-hidden="true" size={16} />
               API status
@@ -992,7 +992,7 @@ export function QuickNotesWorkspace({ userEmail }: { userEmail: string | null })
               onClick={() => {
                 void handleSignOut();
               }}
-              className="qn-secondary-button inline-flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium"
+              className="qn-secondary-button inline-flex h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium"
               title="Sign out"
             >
               <LogOut aria-hidden="true" size={16} />
@@ -1159,10 +1159,10 @@ function UploadPanel({
   onUpload: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <section className="qn-panel rounded-md">
-      <div className="border-b border-[var(--border)] p-4">
+    <section className="qn-panel rounded-lg">
+      <div className="qn-panel-header p-4">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Upload</h2>
+          <h2 className="qn-section-label tracking-normal">Upload</h2>
           <Upload aria-hidden="true" size={18} className="text-[var(--accent)]" />
         </div>
       </div>
@@ -1185,7 +1185,7 @@ function UploadPanel({
         <input name="tags" type="text" placeholder="Tags" className={textInputClass} disabled={isUploading} />
         <button
           type="submit"
-          className="qn-primary-button inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          className="qn-primary-button inline-flex h-11 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
           disabled={isUploading}
           title="Upload PDF"
         >
@@ -1199,7 +1199,7 @@ function UploadPanel({
           </p>
         ) : null}
         {uploadError ? (
-          <p className="qn-state-error flex items-center gap-2 rounded-md px-3 py-2 text-sm">
+          <p className="qn-state-error flex items-center gap-2 rounded-lg px-3 py-2 text-sm">
             <AlertCircle aria-hidden="true" size={16} />
             {uploadError}
           </p>
@@ -1221,9 +1221,9 @@ function DocumentsPanel({
   onSelect: (documentId: string) => void;
 }) {
   return (
-    <section className="qn-panel rounded-md">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Documents</h2>
+    <section className="qn-panel rounded-lg">
+      <div className="qn-panel-header flex items-center justify-between gap-3 p-4">
+        <h2 className="qn-section-label tracking-normal">Documents</h2>
         <FileText aria-hidden="true" size={18} className="text-[var(--accent)]" />
       </div>
       <div className="divide-y divide-[var(--border)]">
@@ -1239,19 +1239,27 @@ function DocumentsPanel({
             key={document.id}
             type="button"
             onClick={() => onSelect(document.id)}
-            className={`qn-row block w-full px-4 py-3 text-left ${document.id === selectedDocumentId ? "qn-row-selected" : ""}`}
+            className={`qn-row block w-full px-4 py-4 text-left ${document.id === selectedDocumentId ? "qn-row-selected" : ""}`}
           >
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="truncate text-sm font-semibold">{document.title}</h3>
-                <p className="mt-1 truncate text-xs text-[var(--muted)]">{document.originalFileName}</p>
+              <div className="flex min-w-0 items-start gap-3">
+                <span
+                  aria-hidden="true"
+                  className="mt-0.5 hidden size-9 shrink-0 items-center justify-center rounded-lg bg-[var(--panel-strong)] text-[var(--citation)] sm:flex"
+                >
+                  <FileText size={17} />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-semibold">{document.title}</h3>
+                  <p className="mt-1 truncate text-xs text-[var(--muted)]">{document.originalFileName}</p>
+                </div>
               </div>
               <StatusBadge status={document.uploadStatus} />
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
-              <span>{document.pageCount ?? 0} pages</span>
-              <span>{document.chunkCount} chunks</span>
-              <span>{formatDate(document.createdAt)}</span>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+              <span className="qn-chip rounded-full px-2.5 py-1">{document.pageCount ?? 0} pages</span>
+              <span className="qn-chip rounded-full px-2.5 py-1">{document.chunkCount} chunks</span>
+              <span className="qn-chip rounded-full px-2.5 py-1">{formatDate(document.createdAt)}</span>
             </div>
           </button>
         ))}
@@ -1296,19 +1304,19 @@ function SearchControlsPanel({
   const active = isFilterStateActive(filters);
 
   return (
-    <section className="qn-panel rounded-md">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Search</h2>
+    <section className="qn-panel rounded-lg">
+      <div className="qn-panel-header flex items-center justify-between gap-3 p-4">
+        <h2 className="qn-section-label tracking-normal">Search</h2>
         <Search aria-hidden="true" size={18} className="text-[var(--accent)]" />
       </div>
-      <form onSubmit={onSearch} className="grid gap-3 p-4 lg:grid-cols-[280px_minmax(0,1fr)_auto] lg:items-center">
-        <div className="qn-segmented grid grid-cols-3 rounded-md p-1" role="radiogroup" aria-label="Search mode">
+      <form onSubmit={onSearch} className="grid gap-3 p-4 lg:grid-cols-[300px_minmax(0,1fr)_auto] lg:items-center">
+        <div className="qn-segmented grid grid-cols-3 rounded-lg p-1" role="radiogroup" aria-label="Search mode">
           {searchModeOptions.map((option) => (
             <button
               key={option.mode}
               type="button"
               onClick={() => onSearchModeChange(option.mode)}
-              className={`qn-segment h-9 rounded-sm text-xs font-semibold ${searchMode === option.mode ? "qn-segment-active" : ""}`}
+              className={`qn-segment h-9 rounded-md text-xs font-semibold ${searchMode === option.mode ? "qn-segment-active" : ""}`}
               aria-pressed={searchMode === option.mode}
               disabled={isSearching}
             >
@@ -1320,13 +1328,13 @@ function SearchControlsPanel({
           value={searchQuery}
           onChange={(event) => onSearchQueryChange(event.target.value)}
           type="search"
-          placeholder="Find text in chunks"
+          placeholder="Search source text across PDFs"
           className={`${textInputClass} min-w-0`}
           disabled={isSearching}
         />
         <button
           type="submit"
-          className="qn-primary-button inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+          className="qn-primary-button inline-flex h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
           disabled={isSearching}
           title="Search chunks"
         >
@@ -1345,7 +1353,7 @@ function SearchControlsPanel({
             </div>
           ) : null}
         </div>
-        <details className="qn-filter-disclosure rounded-md" open={active}>
+        <details className="qn-filter-disclosure rounded-lg" open={active}>
           <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-semibold">
             <Filter aria-hidden="true" size={15} />
             {active ? "Filters active" : "Filters"}
@@ -1361,9 +1369,9 @@ function SearchControlsPanel({
           />
         </details>
       </div>
-      {metadataOptionsError ? <p className="qn-state-error m-4 rounded-md px-3 py-2 text-sm">{metadataOptionsError}</p> : null}
+      {metadataOptionsError ? <p className="qn-state-error m-4 rounded-lg px-3 py-2 text-sm">{metadataOptionsError}</p> : null}
       {searchMetadata ? <SearchModeNotice metadata={searchMetadata} selectedMode={searchMode} /> : null}
-      {searchError ? <p className="qn-state-error m-4 rounded-md px-3 py-2 text-sm">{searchError}</p> : null}
+      {searchError ? <p className="qn-state-error m-4 rounded-lg px-3 py-2 text-sm">{searchError}</p> : null}
     </section>
   );
 }
@@ -1386,9 +1394,9 @@ function SearchResultsPanel({
   onSelect: (result: ChunkSearchResult) => void;
 }) {
   return (
-    <section className="qn-panel rounded-md">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Results</h2>
+    <section className="qn-panel rounded-lg">
+      <div className="qn-panel-header flex items-center justify-between gap-3 p-4">
+        <h2 className="qn-section-label tracking-normal">Results</h2>
         <FileText aria-hidden="true" size={18} className="text-[var(--accent)]" />
       </div>
       <div className="divide-y divide-[var(--border)]">
@@ -1406,7 +1414,7 @@ function SearchResultsPanel({
         {!isSearching && !searchQuery.trim() && results.length === 0 ? (
           <p className="p-4 text-sm text-[var(--muted)]">Search your PDFs by keyword, semantic meaning, or hybrid ranking.</p>
         ) : null}
-        {results.map((result) => {
+        {results.map((result, index) => {
           const display = getSearchResultSourceDisplay(result);
 
           return (
@@ -1414,12 +1422,17 @@ function SearchResultsPanel({
               key={result.chunkId}
               type="button"
               onClick={() => onSelect(result)}
-              className={`qn-row block w-full min-w-0 px-4 py-3 text-left ${result.chunkId === selectedSearchResult?.chunkId ? "qn-row-selected" : ""}`}
+              className={`qn-row block w-full min-w-0 px-4 py-4 text-left ${result.chunkId === selectedSearchResult?.chunkId ? "qn-row-selected" : ""}`}
             >
-              <blockquote className="whitespace-pre-wrap break-words text-sm leading-6">{display.quote}</blockquote>
-              <p className="mt-3 break-words text-xs font-semibold text-[var(--muted)]">
-                Page {display.pageNumber} — {display.pdfName}
-              </p>
+              <div className="flex min-w-0 gap-3">
+                <span className="qn-citation-badge shrink-0">{index + 1}</span>
+                <div className="min-w-0">
+                  <blockquote className="qn-source-quote whitespace-pre-wrap break-words text-sm leading-6">{display.quote}</blockquote>
+                  <p className="qn-source-meta mt-3 break-words text-xs font-semibold">
+                    Page {display.pageNumber} / {display.pdfName}
+                  </p>
+                </div>
+              </div>
             </button>
           );
         })}
@@ -1455,10 +1468,10 @@ function DocumentPreviewPanel({
       : null;
 
   return (
-    <section className="qn-panel rounded-md">
-      <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 md:flex-row md:items-center md:justify-between">
+    <section className="qn-panel rounded-lg">
+      <div className="qn-panel-header flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold">{selectedDocument?.title ?? "Extracted chunks"}</h2>
+          <h2 className="qn-serif truncate text-xl font-semibold">{selectedDocument?.title ?? "Extracted chunks"}</h2>
           <p className="mt-1 truncate text-sm text-[var(--muted)]">{selectedDocument?.originalFileName ?? "Select a document"}</p>
         </div>
         {selectedDocument ? (
@@ -1467,7 +1480,7 @@ function DocumentPreviewPanel({
               href={`/api/documents/${selectedDocument.id}/source`}
               target="_blank"
               rel="noreferrer"
-              className="qn-secondary-button inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-semibold"
+              className="qn-secondary-button inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold"
               title="Open source PDF"
             >
               <ExternalLink aria-hidden="true" size={14} />
@@ -1477,7 +1490,7 @@ function DocumentPreviewPanel({
               <button
                 type="button"
                 onClick={() => onRetry(selectedDocument)}
-                className="qn-secondary-button inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                className="qn-secondary-button inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={documentActionId === selectedDocument.id}
                 title="Retry document processing"
               >
@@ -1492,7 +1505,7 @@ function DocumentPreviewPanel({
             <button
               type="button"
               onClick={() => onDelete(selectedDocument)}
-              className="qn-danger-button inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+              className="qn-danger-button inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
               disabled={documentActionId === selectedDocument.id || selectedDocument.uploadStatus === "DELETING"}
               title="Delete document"
             >
@@ -1509,18 +1522,23 @@ function DocumentPreviewPanel({
       </div>
 
       {selectedSearchResultDisplay ? (
-        <article className="border-b border-[var(--border)] bg-[var(--panel-strong)] p-4">
-          <blockquote className="whitespace-pre-wrap break-words text-sm leading-6">{selectedSearchResultDisplay.quote}</blockquote>
-          <p className="mt-3 break-words text-xs font-semibold text-[var(--muted)]">
-            Page {selectedSearchResultDisplay.pageNumber} — {selectedSearchResultDisplay.pdfName}
-          </p>
+        <article className="qn-study-note border-b border-[var(--border)] bg-[var(--panel-strong)] p-4">
+          <div className="flex min-w-0 gap-3">
+            <span className="qn-citation-badge shrink-0">{selectedSearchResultDisplay.pageNumber}</span>
+            <div className="min-w-0">
+              <blockquote className="qn-source-quote whitespace-pre-wrap break-words text-sm leading-6">{selectedSearchResultDisplay.quote}</blockquote>
+              <p className="qn-source-meta mt-3 break-words text-xs font-semibold">
+                Page {selectedSearchResultDisplay.pageNumber} / {selectedSearchResultDisplay.pdfName}
+              </p>
+            </div>
+          </div>
         </article>
       ) : null}
 
       <div className={previewMode === "chunks" ? "divide-y divide-[var(--border)]" : ""}>
         {previewMode === "title" && selectedDocument ? (
           <div className="p-5">
-            <p className="text-base font-semibold">{selectedDocument.title}</p>
+            <p className="qn-serif text-lg font-semibold">{selectedDocument.title}</p>
           </div>
         ) : null}
         {previewMode === "title" && !selectedDocument ? <p className="p-5 text-sm text-[var(--muted)]">No document selected.</p> : null}
@@ -1538,14 +1556,14 @@ function DocumentPreviewPanel({
         ) : null}
         {previewMode === "chunks" && !isLoadingContent
           ? content?.chunks.map((chunk) => (
-              <article key={chunk.id} className="p-5">
+              <article key={chunk.id} className="qn-study-note p-5">
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
-                  <span className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">Page {chunk.pageNumber}</span>
-                  <span className="rounded-sm bg-[var(--panel-strong)] px-2 py-1">Chunk {chunk.chunkIndex}</span>
+                  <span className="qn-chip-strong rounded-full px-2.5 py-1">Page {chunk.pageNumber}</span>
+                  <span className="qn-chip rounded-full px-2.5 py-1">Chunk {chunk.chunkIndex}</span>
                   <span>{chunk.characterCount} chars</span>
                   <span>{chunk.tokenEstimate} est. tokens</span>
                 </div>
-                <p className="whitespace-pre-wrap text-sm leading-6">{chunk.text}</p>
+                <p className="whitespace-pre-wrap break-words text-sm leading-6">{chunk.text}</p>
               </article>
             ))
           : null}
@@ -1556,16 +1574,16 @@ function DocumentPreviewPanel({
 
 function PageTextPanel({ content }: { content: DocumentContentResponse | null }) {
   return (
-    <section className="qn-panel rounded-md">
-      <div className="border-b border-[var(--border)] p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Page Text</h2>
+    <section className="qn-panel rounded-lg">
+      <div className="qn-panel-header p-4">
+        <h2 className="qn-section-label tracking-normal">Page Text</h2>
       </div>
       <div className="divide-y divide-[var(--border)]">
         {content?.pages.length ? (
           content.pages.map((page) => (
-            <article key={page.id} className="p-4">
-              <div className="mb-2 text-xs font-semibold text-[var(--muted)]">Page {page.pageNumber}</div>
-              <p className="line-clamp-6 whitespace-pre-wrap text-sm leading-6">{page.text || "No extractable text on this page."}</p>
+            <article key={page.id} className="qn-study-note p-4">
+              <div className="mb-2 text-xs font-semibold text-[var(--citation)]">Page {page.pageNumber}</div>
+              <p className="line-clamp-6 whitespace-pre-wrap break-words text-sm leading-6">{page.text || "No extractable text on this page."}</p>
             </article>
           ))
         ) : (
@@ -1600,9 +1618,9 @@ function MetadataPanel({
   const panelState = getMetadataPanelState(selectedDocument, documents);
 
   return (
-    <section className="qn-panel rounded-md">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-normal text-[var(--muted)]">Metadata</h2>
+    <section className="qn-panel rounded-lg">
+      <div className="qn-panel-header flex items-center justify-between gap-3 p-4">
+        <h2 className="qn-section-label tracking-normal">Metadata</h2>
         <Tags aria-hidden="true" size={17} className="text-[var(--accent)]" />
       </div>
       {panelState === "editor" && selectedDocument ? (
@@ -1669,7 +1687,7 @@ function MetadataPanel({
             <TagPreview tags={splitTags(metadataForm.tags)} />
             <button
               type="submit"
-              className="qn-primary-button inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+              className="qn-primary-button inline-flex h-11 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
               disabled={metadataSaveState === "saving"}
               title="Save metadata"
             >
@@ -1677,7 +1695,7 @@ function MetadataPanel({
               Save metadata
             </button>
             {metadataSaveMessage ? (
-              <p className={`text-sm ${metadataSaveState === "error" ? "qn-state-error rounded-md px-3 py-2" : "qn-state-success"}`}>
+              <p className={`text-sm ${metadataSaveState === "error" ? "qn-state-error rounded-lg px-3 py-2" : "qn-state-success"}`}>
                 {metadataSaveMessage}
               </p>
             ) : null}
@@ -1692,7 +1710,7 @@ function MetadataPanel({
               <MetadataItem label="Attempts" value={String(selectedDocument.processingAttemptCount)} />
             </dl>
             {selectedDocument.failureReason ? (
-              <p className="qn-state-error rounded-md p-3 text-xs leading-5">
+              <p className="qn-state-error rounded-lg p-3 text-xs leading-5">
                 {selectedDocument.failureStage ? `${selectedDocument.failureStage}: ` : ""}
                 {selectedDocument.failureReason}
               </p>
@@ -1727,7 +1745,7 @@ function MetadataEmptyState({
         <button
           type="button"
           onClick={onGoToPdfs}
-          className="qn-primary-button inline-flex h-10 w-fit items-center gap-2 rounded-md px-3 text-sm font-semibold"
+          className="qn-primary-button inline-flex h-11 w-fit items-center gap-2 rounded-lg px-3 text-sm font-semibold"
         >
           <FileText aria-hidden="true" size={16} />
           Go to PDFs
@@ -1852,7 +1870,7 @@ function MetadataFilterControls({
         <button
           type="button"
           onClick={onClear}
-          className="qn-secondary-button inline-flex h-9 items-center gap-2 rounded-md px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+          className="qn-secondary-button inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
           disabled={disabled || !active}
           title="Clear filters"
         >
@@ -1884,7 +1902,7 @@ function FilterSelect({
         multiple
         value={values}
         onChange={onChange}
-        className="qn-field min-h-24 rounded-md px-2 py-2 text-sm font-normal normal-case outline-none"
+        className="qn-field min-h-24 rounded-lg px-2 py-2 text-sm font-normal normal-case outline-none"
         disabled={disabled || options.length === 0}
       >
         {options.map((option) => (
@@ -1912,12 +1930,12 @@ function ActiveScope({
     <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
       {chips.length > 0 ? (
         chips.map((chip) => (
-          <span key={chip} className="qn-chip rounded-sm px-2 py-1">
+          <span key={chip} className="qn-chip rounded-full px-2.5 py-1">
             {chip}
           </span>
         ))
       ) : (
-        <span className="qn-chip rounded-sm px-2 py-1">{emptyLabel}</span>
+        <span className="qn-chip rounded-full px-2.5 py-1">{emptyLabel}</span>
       )}
     </div>
   );
@@ -1928,7 +1946,7 @@ function TagPreview({ tags }: { tags: string[] }) {
     <div className="flex flex-wrap gap-2">
       {tags.length > 0 ? (
         tags.map((tag) => (
-          <span key={tag} className="qn-chip rounded-sm px-2 py-1 text-xs font-medium">
+          <span key={tag} className="qn-chip rounded-full px-2.5 py-1 text-xs font-medium">
             {tag}
           </span>
         ))
@@ -2055,12 +2073,12 @@ function formatUploadMessage(payload: Partial<DocumentUploadResponse>) {
 }
 
 function StatusBadge({ status }: { status: StudyDocumentUploadStatus }) {
-  return <span className={`qn-status-badge shrink-0 rounded-sm px-2 py-1 text-xs font-semibold ${statusStyles[status]}`}>{statusLabels[status]}</span>;
+  return <span className={`qn-status-badge shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyles[status]}`}>{statusLabels[status]}</span>;
 }
 
 function MetadataItem({ label, value }: { label: string; value: string }) {
   return (
-    <div>
+    <div className="qn-metric-card">
       <dt className="text-xs uppercase tracking-normal text-[var(--muted)]">{label}</dt>
       <dd className="mt-1 font-medium">{value}</dd>
     </div>
